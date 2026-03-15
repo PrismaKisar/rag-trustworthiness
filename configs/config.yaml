@@ -1,0 +1,49 @@
+# --- Reproducibility ---
+seed: 42
+
+# --- Dataset ---
+dataset:
+  fever_dev: "data/fever/dev.jsonl"
+  fever_train: "data/fever/train.jsonl"
+  fever_pages: "data/fever/wiki-pages"   # Wikipedia dump for evidence dereference
+
+# --- Retrieval ---
+retrieval:
+  embedding_model: "all-MiniLM-L6-v2"
+  k: 5                        # top-K passages returned to the LLM
+  distractor_pool_size: 20    # random passages added to per-example retrieval pool
+
+# --- Poisoning ---
+poisoning:
+  poison_rate: 0.0            # fraction of evidence passages replaced (overridable via CLI)
+  strategy: "opposite_label"  # Strategy A: distractors from opposite-label claims
+
+# --- Models ---
+models:
+  default: "claude-haiku-4-5-20251001"
+  available:
+    - "claude-haiku-4-5-20251001"
+    - "gpt-4o-mini"
+  temperature: 0.0            # 0.0 for deterministic; >0 required for self-consistency runs
+  temperature_consistency: 0.7
+
+# --- Prompts ---
+prompts:
+  default: "standard"         # one of: standard, chain_of_thought, vigilant
+
+# --- Evaluation ---
+evaluation:
+  n_examples: 100             # claims evaluated in main experiment
+  self_consistency_runs: 5    # inference repetitions for self-consistency metric
+  self_consistency_subset: 30 # number of claims used for self-consistency experiment
+
+# --- Caching ---
+cache:
+  dir: ".cache"
+  embeddings_subdir: "embeddings"
+  llm_subdir: "llm_responses"
+
+# --- API Budget ---
+api_budget:
+  max_calls: 3300
+  note: "3000 main experiment + 300 self-consistency. Re-runs are near-free due to caching."
