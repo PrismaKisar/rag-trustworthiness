@@ -33,3 +33,24 @@ def _build_wiki_index(wiki_pages_dir: str) -> dict[str, dict[int, str]]:
                     index[doc["id"]] = sentences
     logger.info("Wiki index built: %d pages", len(index))
     return index
+
+
+def _deref_evidence(
+    raw_evidence: list,
+    index: dict[str, dict[int, str]],
+) -> list[str]:
+    """Return deduplicated sentence strings for all annotator groups."""
+    seen: set[tuple] = set()
+    texts: list[str] = []
+    for group in raw_evidence:
+        for _, _, wiki_page, sent_id in group:
+            if wiki_page is None or sent_id is None:
+                continue
+            key = (wiki_page, sent_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            text = index.get(wiki_page, {}).get(int(sent_id))
+            if text:
+                texts.append(text)
+    return texts
