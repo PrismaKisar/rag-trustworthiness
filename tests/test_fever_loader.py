@@ -61,7 +61,7 @@ def wiki_dir(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Tests – no wiki_pages_dir
+# Tests - no wiki_pages_dir
 # ---------------------------------------------------------------------------
 
 
@@ -99,7 +99,7 @@ def test_max_examples(fever_file):
 
 
 # ---------------------------------------------------------------------------
-# Tests – with wiki_pages_dir
+# Tests - with wiki_pages_dir
 # ---------------------------------------------------------------------------
 
 
@@ -113,7 +113,7 @@ def test_evidence_dereferenced(fever_file, wiki_dir):
 
 
 def test_none_evidence_skipped(fever_file, wiki_dir):
-    """The NOT ENOUGH INFO row has null wiki_page/sent_id – evidence stays []."""
+    """The NOT ENOUGH INFO row has null wiki_page/sent_id - evidence stays []."""
     result = load_fever(str(fever_file), wiki_pages_dir=str(wiki_dir))
     nei = next(r for r in result if r["label"] == "NOT ENOUGH INFO")
     assert nei["evidence"] == []

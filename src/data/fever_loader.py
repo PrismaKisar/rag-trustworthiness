@@ -1,6 +1,6 @@
 """Load FEVER dev/train splits and dereference evidence sentence IDs to text.
 
-Evidence format per claim (Thorne et al., 2018 – FEVER dataset):
+Evidence format per claim (Thorne et al., 2018 - FEVER dataset):
     evidence: list[annotator_group]
     annotator_group: list[[annotator_id, ev_id, wiki_page, sent_id]]
 """
