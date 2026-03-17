@@ -58,3 +58,41 @@ def wiki_dir(tmp_path: Path) -> Path:
         "\n".join(json.dumps(v) for v in WIKI_PAGES.values()), encoding="utf-8"
     )
     return d
+
+
+# ---------------------------------------------------------------------------
+# Tests – no wiki_pages_dir
+# ---------------------------------------------------------------------------
+
+
+def test_returns_list(fever_file):
+    result = load_fever(str(fever_file))
+    assert isinstance(result, list)
+    assert len(result) == len(FEVER_ROWS)
+
+
+def test_required_keys(fever_file):
+    result = load_fever(str(fever_file))
+    for item in result:
+        assert set(item.keys()) == {"claim", "evidence", "label"}
+
+
+def test_claim_is_str(fever_file):
+    for item in load_fever(str(fever_file)):
+        assert isinstance(item["claim"], str) and item["claim"]
+
+
+def test_evidence_is_list_of_str_without_wiki(fever_file):
+    for item in load_fever(str(fever_file)):
+        assert isinstance(item["evidence"], list)
+        assert item["evidence"] == []
+
+
+def test_label_valid(fever_file):
+    for item in load_fever(str(fever_file)):
+        assert item["label"] in VALID_LABELS
+
+
+def test_max_examples(fever_file):
+    result = load_fever(str(fever_file), max_examples=2)
+    assert len(result) == 2
