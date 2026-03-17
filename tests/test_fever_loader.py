@@ -96,3 +96,38 @@ def test_label_valid(fever_file):
 def test_max_examples(fever_file):
     result = load_fever(str(fever_file), max_examples=2)
     assert len(result) == 2
+
+
+# ---------------------------------------------------------------------------
+# Tests – with wiki_pages_dir
+# ---------------------------------------------------------------------------
+
+
+def test_evidence_dereferenced(fever_file, wiki_dir):
+    result = load_fever(str(fever_file), wiki_pages_dir=str(wiki_dir))
+    supports = next(r for r in result if r["label"] == "SUPPORTS")
+    assert isinstance(supports["evidence"], list)
+    assert len(supports["evidence"]) > 0
+    for ev in supports["evidence"]:
+        assert isinstance(ev, str) and ev
+
+
+def test_none_evidence_skipped(fever_file, wiki_dir):
+    """The NOT ENOUGH INFO row has null wiki_page/sent_id – evidence stays []."""
+    result = load_fever(str(fever_file), wiki_pages_dir=str(wiki_dir))
+    nei = next(r for r in result if r["label"] == "NOT ENOUGH INFO")
+    assert nei["evidence"] == []
+
+
+def test_max_examples_with_wiki(fever_file, wiki_dir):
+    result = load_fever(str(fever_file), wiki_pages_dir=str(wiki_dir), max_examples=1)
+    assert len(result) == 1
+
+
+def test_unknown_label_normalized(tmp_path, wiki_dir):
+    """Labels outside VALID_LABELS should fall back to NOT ENOUGH INFO."""
+    bad_row = {"id": 99, "label": "UNKNOWN", "claim": "Test.", "evidence": []}
+    p = tmp_path / "bad.jsonl"
+    p.write_text(json.dumps(bad_row), encoding="utf-8")
+    result = load_fever(str(p), wiki_pages_dir=str(wiki_dir))
+    assert result[0]["label"] == "NOT ENOUGH INFO"
