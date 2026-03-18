@@ -96,3 +96,43 @@ def test_distractors_from_opposite_label_refutes():
             continue
         for passage in poisoned["evidence"]:
             assert passage in supports_pool, f"Unexpected distractor: {passage!r}"
+
+
+# ---------------------------------------------------------------------------
+# Tests — reproducibility
+# ---------------------------------------------------------------------------
+
+
+def test_seed_reproducibility():
+    result_a = poison_dataset(EXAMPLES, poison_rate=0.5, seed=42)
+    result_b = poison_dataset(EXAMPLES, poison_rate=0.5, seed=42)
+    assert result_a == result_b
+
+
+def test_different_seeds_produce_different_output():
+    result_42 = poison_dataset(EXAMPLES, poison_rate=0.5, seed=42)
+    result_99 = poison_dataset(EXAMPLES, poison_rate=0.5, seed=99)
+    evidences_42 = [e["evidence"] for e in result_42 if e["evidence"]]
+    evidences_99 = [e["evidence"] for e in result_99 if e["evidence"]]
+    assert evidences_42 != evidences_99
+
+
+# ---------------------------------------------------------------------------
+# Tests — edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_invalid_poison_rate_raises():
+    with pytest.raises(ValueError, match="poison_rate"):
+        poison_dataset(EXAMPLES, poison_rate=1.5)
+
+
+def test_empty_evidence_unaffected():
+    result = poison_dataset(EXAMPLES, poison_rate=1.0)
+    nei = next(r for r in result if r["label"] == "NOT ENOUGH INFO")
+    assert nei["evidence"] == []
+
+
+def test_returns_same_length():
+    result = poison_dataset(EXAMPLES, poison_rate=0.5)
+    assert len(result) == len(EXAMPLES)
