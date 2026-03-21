@@ -67,7 +67,37 @@ class FaissIndex:
         _, indices = self._index.search(vec, k_eff)
         return indices[0].tolist()
 
+    def save(self, path: str | Path) -> None:
+        """Write the index to *path* (parent directories are created if absent)."""
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        faiss.write_index(self._index, str(out))
+        logger.info("Index saved → %s", out)
+
+    @classmethod
+    def load(cls, path: str | Path) -> "FaissIndex":
+        """Load a previously saved index from *path*.
+
+        Returns:
+            A :class:`FaissIndex` wrapping the loaded FAISS index.
+        """
+        raw = faiss.read_index(str(path))
+        obj = cls.__new__(cls)
+        obj._dim = raw.d
+        obj._index = raw
+        logger.info("Index loaded ← %s  (%d vectors)", path, raw.ntotal)
+        return obj
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
     @property
     def ntotal(self) -> int:
         """Total number of vectors currently in the index."""
         return self._index.ntotal
+
+    @property
+    def dim(self) -> int:
+        """Embedding dimensionality."""
+        return self._dim
