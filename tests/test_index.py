@@ -85,3 +85,49 @@ def test_search_returns_list_of_int(index_with_data):
     assert isinstance(results, list)
     assert all(isinstance(i, int) for i in results)
 
+
+# ---------------------------------------------------------------------------
+# save / load
+# ---------------------------------------------------------------------------
+
+
+def test_save_load_roundtrip(tmp_path):
+    idx = FaissIndex(dim=_DIM)
+    vecs = _unit_vecs(_N)
+    idx.add(vecs)
+
+    idx.save(tmp_path / "index.faiss")
+    loaded = FaissIndex.load(tmp_path / "index.faiss")
+
+    assert loaded.ntotal == _N
+    assert loaded.dim == _DIM
+
+
+def test_save_load_search_results_match(tmp_path):
+    idx = FaissIndex(dim=_DIM)
+    vecs = _unit_vecs(_N)
+    idx.add(vecs)
+    query = _unit_vecs(1)[0]
+
+    idx.save(tmp_path / "index.faiss")
+    loaded = FaissIndex.load(tmp_path / "index.faiss")
+
+    assert idx.search(query, k=5) == loaded.search(query, k=5)
+
+
+def test_save_creates_parent_dirs(tmp_path):
+    idx = FaissIndex(dim=_DIM)
+    idx.add(_unit_vecs(2))
+    nested = tmp_path / "a" / "b" / "index.faiss"
+    idx.save(nested)
+    assert nested.exists()
+
+
+# ---------------------------------------------------------------------------
+# properties
+# ---------------------------------------------------------------------------
+
+
+def test_dim_property():
+    assert FaissIndex(dim=_DIM).dim == _DIM
+
