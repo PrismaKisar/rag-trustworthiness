@@ -136,3 +136,22 @@ class TestOpenAIClientComplete:
             second = client.complete("cached openai prompt")
         assert first == second == "SUPPORTS"
         mock_instance.chat.completions.create.assert_called_once()  # second call from cache
+
+
+# ---------------------------------------------------------------------------
+# Cache key
+# ---------------------------------------------------------------------------
+
+
+class TestCacheKey:
+    def test_deterministic(self):
+        assert _cache_key("p", "m", 0.0) == _cache_key("p", "m", 0.0)
+
+    def test_sensitive_to_model(self):
+        assert _cache_key("p", "model-a", 0.0) != _cache_key("p", "model-b", 0.0)
+
+    def test_sensitive_to_temperature(self):
+        assert _cache_key("p", "m", 0.0) != _cache_key("p", "m", 0.7)
+
+    def test_sensitive_to_prompt(self):
+        assert _cache_key("prompt-1", "m", 0.0) != _cache_key("prompt-2", "m", 0.0)
