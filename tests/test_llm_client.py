@@ -105,3 +105,34 @@ class TestAnthropicClientRetry:
                 with pytest.raises(Exception, match="invalid api key"):
                     client.complete("fail prompt")
         mock_api.assert_called_once()  # raised immediately, no retry
+
+
+# ---------------------------------------------------------------------------
+# OpenAIClient
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAIClientComplete:
+    """openai.OpenAI() validates the API key at construction time, so we patch
+    the constructor to avoid requiring OPENAI_API_KEY in CI/tests."""
+
+    def test_returns_text(self, tmp_path):
+        with patch("openai.OpenAI") as mock_cls:
+            mock_instance = MagicMock()
+            mock_cls.return_value = mock_instance
+            client = OpenAIClient(cache_dir=tmp_path / "llm_oai")
+            mock_instance.chat.completions.create.return_value = _openai_response("NOT ENOUGH INFO")
+            result = client.complete("openai prompt")
+        assert result == "NOT ENOUGH INFO"
+        mock_instance.chat.completions.create.assert_called_once()
+
+    def test_cache_hit_skips_api(self, tmp_path):
+        with patch("openai.OpenAI") as mock_cls:
+            mock_instance = MagicMock()
+            mock_cls.return_value = mock_instance
+            client = OpenAIClient(cache_dir=tmp_path / "llm_oai_cache")
+            mock_instance.chat.completions.create.return_value = _openai_response("SUPPORTS")
+            first = client.complete("cached openai prompt")
+            second = client.complete("cached openai prompt")
+        assert first == second == "SUPPORTS"
+        mock_instance.chat.completions.create.assert_called_once()  # second call from cache

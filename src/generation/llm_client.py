@@ -152,3 +152,55 @@ class AnthropicClient(LLMClient):
             messages=[{"role": "user", "content": prompt}],
         )
         return msg.content[0].text
+
+
+class OpenAIClient(LLMClient):
+    """OpenAI GPT client.
+
+    Args:
+        model: OpenAI model ID (e.g. ``"gpt-4o-mini"``).
+        temperature: Sampling temperature.
+        cache_dir: Disk cache directory.
+        max_tokens: Maximum tokens in the completion.
+    """
+
+    def __init__(
+        self,
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.0,
+        cache_dir: str | os.PathLike = ".cache/llm_responses",
+        max_tokens: int = 256,
+    ) -> None:
+        super().__init__(model=model, temperature=temperature, cache_dir=cache_dir)
+        import openai  # deferred so tests can mock before import
+        self._client = openai.OpenAI(max_retries=0)  # retries handled here
+        self._max_tokens = max_tokens
+
+    def _call_api(self, prompt: str) -> str:
+        resp = self._client.chat.completions.create(
+            model=self._model,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return resp.choices[0].message.content
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _cache_key(prompt: str, model: str, temperature: float) -> str:
+    """SHA-256 of the ``(prompt, model, temperature)`` triple."""
+    raw = f"{prompt}\x00{model}\x00{temperature}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _extract_status(exc: Exception) -> int | None:
+    """Try to extract an HTTP status code from *exc*."""
+    for attr in ("status_code", "http_status", "code"):
+        val = getattr(exc, attr, None)
+        if isinstance(val, int):
+            return val
+    return None
