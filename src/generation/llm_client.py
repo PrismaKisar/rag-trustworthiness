@@ -115,3 +115,40 @@ class LLMClient(ABC):
                 )
                 time.sleep(wait)
         raise RuntimeError("unreachable")  # satisfies type checker
+
+
+# ---------------------------------------------------------------------------
+# Concrete clients
+# ---------------------------------------------------------------------------
+
+
+class AnthropicClient(LLMClient):
+    """Anthropic Claude client.
+
+    Args:
+        model: Claude model ID (e.g. ``"claude-haiku-4-5-20251001"``).
+        temperature: Sampling temperature.
+        cache_dir: Disk cache directory.
+        max_tokens: Maximum tokens in the completion.
+    """
+
+    def __init__(
+        self,
+        model: str = "claude-haiku-4-5-20251001",
+        temperature: float = 0.0,
+        cache_dir: str | os.PathLike = ".cache/llm_responses",
+        max_tokens: int = 256,
+    ) -> None:
+        super().__init__(model=model, temperature=temperature, cache_dir=cache_dir)
+        import anthropic  # deferred so tests can mock before import
+        self._client = anthropic.Anthropic(max_retries=0)  # retries handled here
+        self._max_tokens = max_tokens
+
+    def _call_api(self, prompt: str) -> str:
+        msg = self._client.messages.create(
+            model=self._model,
+            max_tokens=self._max_tokens,
+            temperature=self._temperature,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text
