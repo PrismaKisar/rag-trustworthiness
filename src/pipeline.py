@@ -41,6 +41,8 @@ def main(argv=None) -> dict:
         choices=["standard", "chain_of_thought", "vigilant"],
     )
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--self_consistency_runs", type=int, default=None,
+                        help="Inference runs per claim for self-consistency")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -51,6 +53,8 @@ def main(argv=None) -> dict:
     poison_rate = args.poison_rate if args.poison_rate is not None else cfg["poisoning"]["poison_rate"]
     model = args.model if args.model is not None else cfg["models"]["default"]
     prompt_type = args.prompt_type if args.prompt_type is not None else cfg["prompts"]["default"]
+    sc_runs = (args.self_consistency_runs if args.self_consistency_runs is not None
+               else cfg["evaluation"].get("self_consistency_runs", 1))
 
     # Load FEVER dev set; wiki-pages dir is optional (falls back to claim-only mode)
     wiki_pages_dir = cfg["dataset"]["fever_pages"]
@@ -76,14 +80,16 @@ def main(argv=None) -> dict:
 
     llm = _build_llm(model, cfg)
 
-    metrics = run_scorer(
-        examples=examples,
-        retriever=retriever,
-        llm=llm,
-        prompt_type=prompt_type,
-        distractor_pool_size=cfg["retrieval"]["distractor_pool_size"],
-        seed=seed,
-    )
+    with embedder, llm:
+        metrics = run_scorer(
+            examples=examples,
+            retriever=retriever,
+            llm=llm,
+            prompt_type=prompt_type,
+            distractor_pool_size=cfg["retrieval"]["distractor_pool_size"],
+            seed=seed,
+            self_consistency_runs=sc_runs,
+        )
 
     run_cfg = {
         "n": n,
@@ -91,6 +97,7 @@ def main(argv=None) -> dict:
         "model": model,
         "prompt_type": prompt_type,
         "seed": seed,
+        "self_consistency_runs": sc_runs,
     }
     print(json.dumps({"config": run_cfg, "metrics": metrics}, indent=2))
     return metrics
