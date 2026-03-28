@@ -91,7 +91,9 @@ def load_fever(
             if index:
                 try:
                     evidence = _deref_evidence(item.get("evidence", []), index)
-                except Exception:
+                except (KeyError, IndexError, ValueError) as exc:
+                    logger.warning("Evidence dereference failed for claim %r: %s",
+                                   item.get("claim", "?"), exc)
                     evidence = []
 
             examples.append(

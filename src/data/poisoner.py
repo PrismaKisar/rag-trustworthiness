@@ -69,12 +69,12 @@ def poison_dataset(
 
         if n_poison > 0:
             own_set = set(evidence)
-            candidates = [
+            candidates = list({
                 p
                 for lbl in _OPPOSITE[ex["label"]]
                 for p in pool[lbl]
                 if p not in own_set
-            ]
+            })
             if not candidates:
                 logger.warning(
                     "No distractor candidates for label '%s' — skipping poisoning.",
@@ -82,9 +82,18 @@ def poison_dataset(
                 )
             else:
                 indices = rng.sample(range(len(evidence)), k=n_poison)
-                distractors = rng.choices(candidates, k=n_poison)
+                if len(candidates) >= n_poison:
+                    distractors = rng.sample(candidates, k=n_poison)
+                else:
+                    logger.warning(
+                        "Distractor pool (%d) smaller than n_poison (%d) "
+                        "— sampling with replacement.",
+                        len(candidates), n_poison,
+                    )
+                    distractors = rng.choices(candidates, k=n_poison)
                 for idx, distractor in zip(indices, distractors):
                     evidence[idx] = distractor
+                ex_copy["poisoned_positions"] = set(indices)
 
         poisoned.append(ex_copy)
 
