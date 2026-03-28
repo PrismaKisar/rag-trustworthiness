@@ -103,8 +103,9 @@ class LLMClient(ABC):
                 return self._call_api(prompt)
             except Exception as exc:
                 status = _extract_status(exc)
-                # Non-transient HTTP errors (e.g. 401 auth) → fail immediately.
-                if status is not None and status not in _RETRYABLE_STATUSES:
+                # Only retry known transient HTTP errors; everything else
+                # (auth errors, programming bugs, unknown exceptions) fails fast.
+                if status is None or status not in _RETRYABLE_STATUSES:
                     raise
                 if attempt == _MAX_RETRIES:
                     raise

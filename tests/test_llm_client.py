@@ -106,6 +106,39 @@ class TestAnthropicClientRetry:
                     client.complete("fail prompt")
         mock_api.assert_called_once()  # raised immediately, no retry
 
+    def test_retry_exhaustion_raises(self, tmp_path):
+        """After MAX_RETRIES+1 transient failures the last exception is raised."""
+        client = AnthropicClient(cache_dir=tmp_path / "llm_exhaust")
+        side_effects = [_rate_limit_error()] * 5  # 1 initial + 4 retries = 5
+        with patch.object(client._client.messages, "create", side_effect=side_effects) as mock_api:
+            with patch("src.generation.llm_client.time.sleep"):
+                with pytest.raises(Exception, match="rate limit"):
+                    client.complete("exhaust prompt")
+        assert mock_api.call_count == 5
+
+    @pytest.mark.parametrize("status", [500, 503])
+    def test_retries_on_server_error(self, tmp_path, status):
+        """Transient server errors (500, 503) are retried like 429."""
+        client = AnthropicClient(cache_dir=tmp_path / f"llm_{status}")
+        err = Exception(f"server error {status}")
+        err.status_code = status  # type: ignore[attr-defined]
+        side_effects = [err, _anthropic_response("SUPPORTS")]
+        with patch.object(client._client.messages, "create", side_effect=side_effects):
+            with patch("src.generation.llm_client.time.sleep"):
+                result = client.complete("server error prompt")
+        assert result == "SUPPORTS"
+
+    def test_no_retry_on_programming_error(self, tmp_path):
+        """Exceptions without HTTP status (e.g. TypeError) must not be retried."""
+        client = AnthropicClient(cache_dir=tmp_path / "llm_prog")
+        with patch.object(
+            client._client.messages, "create", side_effect=TypeError("bad arg"),
+        ) as mock_api:
+            with patch("src.generation.llm_client.time.sleep"):
+                with pytest.raises(TypeError, match="bad arg"):
+                    client.complete("prog error prompt")
+        mock_api.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # OpenAIClient
