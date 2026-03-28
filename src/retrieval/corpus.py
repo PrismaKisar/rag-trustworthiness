@@ -71,7 +71,8 @@ def build_corpus(
     distractors = rng.sample(candidates, k=n_sample) if n_sample > 0 else []
 
     passages = evidence + distractors
-    gold_indices = set(range(len(evidence)))
+    poisoned_positions: set[int] = example.get("poisoned_positions", set())
+    gold_indices = set(range(len(evidence))) - poisoned_positions
 
     return RetrievalCorpus(passages=passages, gold_indices=gold_indices)
 

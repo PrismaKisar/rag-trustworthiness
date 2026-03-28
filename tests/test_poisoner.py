@@ -122,9 +122,10 @@ def test_different_seeds_produce_different_output():
 # ---------------------------------------------------------------------------
 
 
-def test_invalid_poison_rate_raises():
+@pytest.mark.parametrize("rate", [1.5, -0.1])
+def test_invalid_poison_rate_raises(rate):
     with pytest.raises(ValueError, match="poison_rate"):
-        poison_dataset(EXAMPLES, poison_rate=1.5)
+        poison_dataset(EXAMPLES, poison_rate=rate)
 
 
 def test_empty_evidence_unaffected():
@@ -136,3 +137,33 @@ def test_empty_evidence_unaffected():
 def test_returns_same_length():
     result = poison_dataset(EXAMPLES, poison_rate=0.5)
     assert len(result) == len(EXAMPLES)
+
+
+def test_poisoned_positions_tracked():
+    """Poisoned examples must carry ``poisoned_positions`` marking replaced indices."""
+    result = poison_dataset(EXAMPLES, poison_rate=1.0)
+    for original, poisoned in zip(EXAMPLES, result):
+        if not original["evidence"]:
+            assert "poisoned_positions" not in poisoned
+        else:
+            assert "poisoned_positions" in poisoned
+            assert len(poisoned["poisoned_positions"]) == len(original["evidence"])
+
+
+def test_no_poisoned_positions_at_rate_zero():
+    """At rate 0 no passages are replaced, so no poisoned_positions key."""
+    result = poison_dataset(EXAMPLES, poison_rate=0.0)
+    for item in result:
+        assert "poisoned_positions" not in item
+
+
+def test_sample_without_replacement():
+    """When pool is large enough, distractors must be unique (no duplicates)."""
+    result = poison_dataset(EXAMPLES, poison_rate=1.0)
+    for original, poisoned in zip(EXAMPLES, result):
+        if len(original["evidence"]) > 1:
+            poisoned_passages = [
+                poisoned["evidence"][i] for i in poisoned.get("poisoned_positions", set())
+            ]
+            # With a large-enough pool, sample() produces unique distractors
+            assert len(poisoned_passages) == len(set(poisoned_passages))

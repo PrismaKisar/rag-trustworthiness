@@ -20,6 +20,7 @@ from src.evaluation.metrics import (
     accuracy,
     hallucination_rate,
     macro_f1,
+    precision_at_k,
     self_consistency,
 )
 from src.generation.llm_client import LLMClient
@@ -56,11 +57,13 @@ def run(
 
     Returns:
         Dict with keys ``accuracy``, ``macro_f1``, ``hallucination_rate``,
-        and ``self_consistency`` (only when *self_consistency_runs* > 1).
+        ``precision_at_k``, and ``self_consistency`` (only when
+        *self_consistency_runs* > 1).
     """
     gold_labels: list[str] = []
     predictions: list[str] = []
     runs_per_claim: list[list[str]] = []
+    precisions: list[float] = []
 
     for i, example in enumerate(examples):
         corpus = build_corpus(
@@ -72,6 +75,9 @@ def run(
         )
         retriever.build(corpus)
         passages = retriever.retrieve(example["claim"])
+
+        gold_passages = [corpus.passages[j] for j in corpus.gold_indices]
+        precisions.append(precision_at_k(passages, gold_passages))
 
         rng = random.Random(seed + i)
         claim_runs: list[str] = []
@@ -97,6 +103,7 @@ def run(
         "accuracy": accuracy(predictions, gold_labels),
         "macro_f1": macro_f1(predictions, gold_labels),
         "hallucination_rate": hallucination_rate(predictions, gold_labels),
+        "precision_at_k": sum(precisions) / len(precisions) if precisions else 0.0,
     }
     if self_consistency_runs > 1:
         metrics["self_consistency"] = self_consistency(runs_per_claim)

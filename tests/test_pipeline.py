@@ -82,9 +82,10 @@ def test_pipeline_returns_valid_metrics(mock_llm, tmp_path):
             "--model", "claude-haiku-4-5-20251001",
             "--prompt_type", "standard",
             "--seed", "42",
+            "--self_consistency_runs", "1",
         ])
 
-    required_keys = {"accuracy", "macro_f1", "hallucination_rate"}
+    required_keys = {"accuracy", "macro_f1", "hallucination_rate", "precision_at_k"}
     assert required_keys.issubset(metrics.keys()), f"Missing keys: {required_keys - metrics.keys()}"
 
     for key in required_keys:
@@ -118,6 +119,7 @@ def test_pipeline_poison_rate_override(mock_llm, tmp_path):
             "--poison_rate", "0.5",
             "--model", "claude-haiku-4-5-20251001",
             "--prompt_type", "standard",
+            "--self_consistency_runs", "1",
         ])
 
     mock_poison.assert_called_once()
@@ -150,6 +152,7 @@ def test_pipeline_no_poison_skips_poisoner(mock_llm):
             "--poison_rate", "0.0",
             "--model", "claude-haiku-4-5-20251001",
             "--prompt_type", "standard",
+            "--self_consistency_runs", "1",
         ])
 
     mock_poison.assert_not_called()

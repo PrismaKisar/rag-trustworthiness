@@ -36,7 +36,7 @@ def _llm(response="SUPPORTS"):
 class TestRunBasic:
     def test_returns_required_keys(self):
         result = scorer.run(EXAMPLES, _retriever(), _llm())
-        assert {"accuracy", "macro_f1", "hallucination_rate"} <= result.keys()
+        assert {"accuracy", "macro_f1", "hallucination_rate", "precision_at_k"} <= result.keys()
 
     def test_no_self_consistency_key_by_default(self):
         result = scorer.run(EXAMPLES, _retriever(), _llm())
@@ -98,3 +98,78 @@ class TestPromptTypes:
     def test_all_prompt_types_run(self, prompt_type):
         result = scorer.run(EXAMPLES, _retriever(), _llm(), prompt_type=prompt_type)
         assert "accuracy" in result
+
+
+# ---------------------------------------------------------------------------
+# Precision@k
+# ---------------------------------------------------------------------------
+
+class TestPrecisionAtK:
+    def test_precision_at_k_present(self):
+        result = scorer.run(EXAMPLES, _retriever(), _llm())
+        assert "precision_at_k" in result
+
+    def test_precision_at_k_in_range(self):
+        result = scorer.run(EXAMPLES, _retriever(), _llm())
+        assert 0.0 <= result["precision_at_k"] <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Seed reproducibility
+# ---------------------------------------------------------------------------
+
+class TestReproducibility:
+    def test_same_seed_same_metrics(self):
+        llm1 = _llm("SUPPORTS")
+        llm2 = _llm("SUPPORTS")
+        r1 = scorer.run(EXAMPLES, _retriever(), llm1, seed=42)
+        r2 = scorer.run(EXAMPLES, _retriever(), llm2, seed=42)
+        assert r1 == r2
+
+
+# ---------------------------------------------------------------------------
+# Integration: poisoning degrades accuracy
+# ---------------------------------------------------------------------------
+
+class TestPoisoningDegradation:
+    """Verify that poisoning the evidence actually degrades model accuracy.
+
+    Uses a mock LLM that returns the correct label when gold evidence
+    is present in the prompt, but returns a wrong label when it finds
+    distractor evidence from the opposite label.
+    """
+
+    _CLEAN_EXAMPLES = [
+        {"claim": "Paris is in France.", "evidence": ["Paris is located in France."], "label": "SUPPORTS"},
+        {"claim": "Rome is in France.", "evidence": ["Rome is the capital of Italy."], "label": "REFUTES"},
+        {"claim": "Paris is in France.", "evidence": ["Paris is located in France."], "label": "SUPPORTS"},
+        {"claim": "Rome is in France.", "evidence": ["Rome is the capital of Italy."], "label": "REFUTES"},
+    ]
+
+    def _make_smart_llm(self):
+        """LLM that returns SUPPORTS when it sees gold evidence, REFUTES otherwise."""
+        gold_snippets = {"Paris is located in France.", "Rome is the capital of Italy."}
+        llm = MagicMock()
+
+        def _complete(prompt):
+            for snippet in gold_snippets:
+                if snippet in prompt:
+                    if "Paris" in prompt:
+                        return "SUPPORTS"
+                    return "REFUTES"
+            # No gold evidence → always return SUPPORTS (wrong for REFUTES claims)
+            return "SUPPORTS"
+
+        llm.complete.side_effect = _complete
+        return llm
+
+    def test_poisoning_degrades_accuracy(self):
+        from src.data.poisoner import poison_dataset
+
+        clean = self._CLEAN_EXAMPLES
+        poisoned = poison_dataset(clean, poison_rate=1.0, seed=0)
+
+        result_clean = scorer.run(clean, _retriever(), self._make_smart_llm(), seed=0)
+        result_poisoned = scorer.run(poisoned, _retriever(), self._make_smart_llm(), seed=0)
+
+        assert result_clean["accuracy"] >= result_poisoned["accuracy"]

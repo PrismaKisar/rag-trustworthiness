@@ -43,8 +43,7 @@ def test_no_own_evidence_in_distractors():
     corpus = build_corpus(EXAMPLES[0], EXAMPLES, distractor_pool_size=20, example_index=0)
     distractors = [p for i, p in enumerate(corpus.passages) if i not in corpus.gold_indices]
     own = set(EXAMPLES[0]["evidence"])
-    # Distractors may coincidentally match; but they should NOT exceed own evidence count
-    assert all(p not in own or p in [p2 for ex in EXAMPLES[1:] for p2 in ex["evidence"]] for p in distractors)
+    assert all(p not in own for p in distractors)
 
 
 def test_distractor_pool_capped_when_small_dataset():
@@ -89,4 +88,31 @@ def test_build_all_corpora_each_is_retrieval_corpus():
 def test_build_all_corpora_gold_indices_per_example():
     corpora = build_all_corpora(EXAMPLES)
     for ex, corpus in zip(EXAMPLES, corpora):
-        assert corpus.gold_indices == set(range(len(ex["evidence"])))
+        poisoned = ex.get("poisoned_positions", set())
+        assert corpus.gold_indices == set(range(len(ex["evidence"]))) - poisoned
+
+
+# ---------------------------------------------------------------------------
+# Edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_empty_evidence_produces_only_distractors():
+    """An example with empty evidence (e.g. NOT ENOUGH INFO) should have no gold indices."""
+    empty_ex = {"claim": "Unknown.", "evidence": [], "label": "NOT ENOUGH INFO"}
+    corpus = build_corpus(empty_ex, EXAMPLES, distractor_pool_size=5, example_index=None)
+    assert corpus.gold_indices == set()
+    assert len(corpus.passages) > 0  # only distractors
+
+
+def test_poisoned_positions_excluded_from_gold():
+    """Passages replaced by the poisoner must not appear in gold_indices."""
+    poisoned_ex = {
+        "claim": "A",
+        "evidence": ["real", "fake", "real2"],
+        "poisoned_positions": {1},
+        "label": "SUPPORTS",
+    }
+    corpus = build_corpus(poisoned_ex, EXAMPLES, distractor_pool_size=0, example_index=None)
+    assert 1 not in corpus.gold_indices
+    assert corpus.gold_indices == {0, 2}
