@@ -2,7 +2,6 @@
 import argparse
 import json
 import os
-from pathlib import Path
 
 import yaml
 
@@ -56,14 +55,8 @@ def main(argv=None) -> dict:
     sc_runs = (args.self_consistency_runs if args.self_consistency_runs is not None
                else cfg["evaluation"].get("self_consistency_runs", 1))
 
-    # Load FEVER dev set; wiki-pages dir is optional (falls back to claim-only mode)
-    wiki_pages_dir = cfg["dataset"]["fever_pages"]
-    if not Path(wiki_pages_dir).exists():
-        wiki_pages_dir = None
-
     examples = load_fever(
         cfg["dataset"]["fever_dev"],
-        wiki_pages_dir=wiki_pages_dir,
         max_examples=n,
     )
 

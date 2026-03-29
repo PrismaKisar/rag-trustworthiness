@@ -47,6 +47,11 @@ class Embedder:
         self._batch_size = batch_size
         self._cache = diskcache.Cache(str(cache_dir))
         logger.info("Loading embedding model '%s' on %s", model_name, device)
+        # Suppress harmless load-time warnings from transformers/sentence-transformers:
+        # BertModel LOAD REPORT (unexpected keys) and "layers were not sharded".
+        logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
+        logging.getLogger("transformers.integrations.tensor_parallel").setLevel(logging.ERROR)
+        logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
         self._model = SentenceTransformer(model_name, device=device)
 
     # ------------------------------------------------------------------
