@@ -5,7 +5,6 @@ seed: 42
 dataset:
   fever_dev: "data/fever/dev.jsonl"
   fever_train: "data/fever/train.jsonl"
-  fever_pages: "data/fever/wiki-pages"   # Wikipedia dump for evidence dereference
 
 # --- Retrieval ---
 retrieval:
@@ -33,7 +32,7 @@ prompts:
 
 # --- Evaluation ---
 evaluation:
-  n_examples: 100             # claims evaluated in main experiment
+  n_examples: 50              # claims evaluated in main experiment
   self_consistency_runs: 5    # inference repetitions for self-consistency metric
   self_consistency_subset: 30 # number of claims used for self-consistency experiment
 
