@@ -65,7 +65,8 @@ def poison_dataset(
     for ex in examples:
         ex_copy = deepcopy(ex)
         evidence = ex_copy["evidence"]
-        n_poison = round(poison_rate * len(evidence))
+        indices = [i for i in range(len(evidence)) if rng.random() < poison_rate]
+        n_poison = len(indices)
 
         if n_poison > 0:
             own_set = set(evidence)
@@ -81,7 +82,6 @@ def poison_dataset(
                     ex["label"],
                 )
             else:
-                indices = rng.sample(range(len(evidence)), k=n_poison)
                 if len(candidates) >= n_poison:
                     distractors = rng.sample(candidates, k=n_poison)
                 else:
