@@ -29,6 +29,10 @@ models:
 # --- Prompts ---
 prompts:
   default: "standard"         # one of: standard, chain_of_thought, vigilant
+  max_tokens:
+    standard: 64              # label only (~5 tokens), generous headroom
+    chain_of_thought: 512     # reasoning + label, k=5 passages → ~500 tokens
+    vigilant: 256             # consistency check (k=5 contradictions) + label → ~50-100 tokens
 
 # --- Evaluation ---
 evaluation:
