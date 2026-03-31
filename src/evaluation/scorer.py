@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import random
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.evaluation.metrics import (
     accuracy,
@@ -32,6 +33,13 @@ from src.retrieval.retriever import Retriever
 logger = logging.getLogger(__name__)
 
 
+_MAX_TOKENS: dict[str, int] = {
+    "standard": 64,
+    "chain_of_thought": 512,
+    "vigilant": 256,
+}
+
+
 def run(
     examples: list[dict],
     retriever: Retriever,
@@ -40,6 +48,7 @@ def run(
     distractor_pool_size: int = 20,
     seed: int = 42,
     self_consistency_runs: int = 1,
+    n_workers: int = 4,
 ) -> dict[str, float]:
     """Run *llm* on every example and return aggregated metrics.
 
@@ -54,15 +63,18 @@ def run(
         self_consistency_runs: Inference runs per claim (≥1).  When > 1,
                                retrieved passages are shuffled between runs
                                and the majority label is the final prediction.
+        n_workers: Number of parallel threads for LLM calls. Retrieval remains
+                   sequential (embedder is not thread-safe).
 
     Returns:
         Dict with keys ``accuracy``, ``macro_f1``, ``hallucination_rate``,
         ``precision_at_k``, and ``self_consistency`` (only when
         *self_consistency_runs* > 1).
     """
-    gold_labels: list[str] = []
-    predictions: list[str] = []
-    runs_per_claim: list[list[str]] = []
+    # ------------------------------------------------------------------
+    # Phase 1 — retrieval (sequential: embedder / FAISS not thread-safe)
+    # ------------------------------------------------------------------
+    records: list[dict] = []
     precisions: list[float] = []
 
     for i, example in enumerate(examples):
@@ -80,23 +92,54 @@ def run(
         precisions.append(precision_at_k(passages, gold_passages))
 
         rng = random.Random(seed + i)
-        claim_runs: list[str] = []
-        for run_idx in range(self_consistency_runs):
-            if run_idx > 0:
-                passages = list(passages)
-                rng.shuffle(passages)
-            prompt = format_prompt(example["claim"], passages, prompt_type)
-            claim_runs.append(extract_label(llm.complete(prompt)))
+        runs_passages = [passages]
+        for _ in range(self_consistency_runs - 1):
+            p = list(passages)
+            rng.shuffle(p)
+            runs_passages.append(p)
 
+        prompts = [format_prompt(example["claim"], p, prompt_type) for p in runs_passages]
+        records.append({"gold": example["label"], "prompts": prompts})
+
+    max_tokens = _MAX_TOKENS.get(prompt_type, 256)
+
+    # ------------------------------------------------------------------
+    # Phase 2 — LLM calls (parallel: I/O-bound, cache is thread-safe)
+    # ------------------------------------------------------------------
+    tasks = [
+        (rec_idx, run_idx, prompt)
+        for rec_idx, rec in enumerate(records)
+        for run_idx, prompt in enumerate(rec["prompts"])
+    ]
+    responses: dict[tuple[int, int], str] = {}
+
+    with ThreadPoolExecutor(max_workers=min(n_workers, len(tasks))) as pool:
+        future_to_key = {
+            pool.submit(llm.complete, prompt, max_tokens): (rec_idx, run_idx)
+            for rec_idx, run_idx, prompt in tasks
+        }
+        for future in as_completed(future_to_key):
+            key = future_to_key[future]
+            responses[key] = extract_label(future.result())
+
+    # ------------------------------------------------------------------
+    # Phase 3 — aggregate
+    # ------------------------------------------------------------------
+    gold_labels: list[str] = []
+    predictions: list[str] = []
+    runs_per_claim: list[list[str]] = []
+
+    for rec_idx, rec in enumerate(records):
+        claim_runs = [responses[(rec_idx, j)] for j in range(len(rec["prompts"]))]
         predicted = Counter(claim_runs).most_common(1)[0][0]
-        gold_labels.append(example["label"])
+        gold_labels.append(rec["gold"])
         predictions.append(predicted)
         if self_consistency_runs > 1:
             runs_per_claim.append(claim_runs)
 
         logger.debug(
             "Example %d/%d  gold=%s  pred=%s",
-            i + 1, len(examples), example["label"], predicted,
+            rec_idx + 1, len(records), rec["gold"], predicted,
         )
 
     metrics: dict[str, float] = {
