@@ -70,7 +70,7 @@ def poison_dataset(
 
         if n_poison > 0:
             own_set = set(evidence)
-            candidates = list({
+            candidates = sorted({
                 p
                 for lbl in _OPPOSITE[ex["label"]]
                 for p in pool[lbl]
