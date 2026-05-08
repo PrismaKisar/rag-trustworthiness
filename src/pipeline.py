@@ -9,7 +9,7 @@ from src.data.fever_loader import load_fever
 from src.data.poisoner import poison_dataset
 from src.retrieval.embedder import Embedder
 from src.retrieval.retriever import Retriever
-from src.generation.llm_client import AnthropicClient, OpenAIClient
+from src.generation.llm_client import HuggingFaceClient
 from src.evaluation.scorer import run as run_scorer
 
 
@@ -21,11 +21,7 @@ def load_config(path: str) -> dict:
 def _build_llm(model: str, cfg: dict):
     cache_dir = os.path.join(cfg["cache"]["dir"], cfg["cache"]["llm_subdir"])
     temperature = cfg["models"]["temperature"]
-    if model.startswith("claude"):
-        return AnthropicClient(model=model, temperature=temperature, cache_dir=cache_dir)
-    if model.startswith("gpt"):
-        return OpenAIClient(model=model, temperature=temperature, cache_dir=cache_dir)
-    raise ValueError(f"Unknown model: {model!r}")
+    return HuggingFaceClient(model=model, temperature=temperature, cache_dir=cache_dir)
 
 
 def main(argv=None) -> dict:

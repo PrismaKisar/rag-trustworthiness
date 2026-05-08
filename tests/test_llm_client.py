@@ -1,11 +1,13 @@
-"""Tests for src/generation/llm_client.py (step 13).
+"""Tests for src/generation/llm_client.py.
 
 Assertions:
-- complete() returns the mocked response text.
-- Second call is served from cache (API not called again).
-- Retry behavior: API called multiple times on transient (429) errors.
-- Non-retryable error (401) raises immediately without retry.
-- Cache key is sensitive to model and temperature.
+- complete() returns the model response text (new tokens only, not input).
+- Second call with same prompt is served from cache (model not called again).
+- Cache key is sensitive to model, temperature, and max_tokens.
+- Greedy decoding when temperature == 0; sampling when temperature > 0.
+- truncation=True is always passed to the tokenizer.
+- pad_token_id is set to eos_token_id when missing.
+- apply_chat_template is called to format the prompt as a chat message.
 """
 
 from __future__ import annotations
@@ -13,162 +15,223 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
 
-from src.generation.llm_client import AnthropicClient, OpenAIClient, _cache_key
+from src.generation.llm_client import HuggingFaceClient, _cache_key
 
-
-# ---------------------------------------------------------------------------
-# Response builders
-# ---------------------------------------------------------------------------
-
-
-def _anthropic_response(text: str) -> MagicMock:
-    mock = MagicMock()
-    mock.content[0].text = text
-    return mock
-
-
-def _openai_response(text: str) -> MagicMock:
-    mock = MagicMock()
-    mock.choices[0].message.content = text
-    return mock
-
-
-def _rate_limit_error() -> Exception:
-    exc = Exception("rate limit exceeded")
-    exc.status_code = 429  # type: ignore[attr-defined]
-    return exc
-
-
-def _auth_error() -> Exception:
-    exc = Exception("invalid api key")
-    exc.status_code = 401  # type: ignore[attr-defined]
-    return exc
+_INPUT_LEN = 10  # simulated number of input tokens
 
 
 # ---------------------------------------------------------------------------
-# AnthropicClient
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-class TestAnthropicClientComplete:
+def _make_client(
+    tmp_path,
+    model: str = "Qwen/Qwen2.5-1.5B-Instruct",
+    temperature: float = 0.0,
+    max_tokens: int = 64,
+) -> tuple[HuggingFaceClient, MagicMock, MagicMock]:
+    """Instantiate HuggingFaceClient with mocked tokenizer and causal model."""
+    with (
+        patch("src.generation.llm_client.AutoTokenizer") as mock_tok_cls,
+        patch("src.generation.llm_client.AutoModelForCausalLM") as mock_model_cls,
+        patch("src.generation.llm_client._get_device", return_value="cpu"),
+    ):
+        mock_tokenizer = MagicMock()
+        mock_tok_cls.from_pretrained.return_value = mock_tokenizer
+        mock_tokenizer.pad_token_id = 0  # already set — no override needed
+        mock_tokenizer.eos_token_id = 1
+
+        mock_hf_model = MagicMock()
+        mock_model_cls.from_pretrained.return_value = mock_hf_model
+        mock_hf_model.to.return_value = mock_hf_model
+
+        client = HuggingFaceClient(
+            model=model,
+            temperature=temperature,
+            cache_dir=tmp_path / "llm",
+            max_tokens=max_tokens,
+        )
+
+    client._tokenizer = mock_tokenizer
+    client._hf_model = mock_hf_model
+    client._device = "cpu"
+    return client, mock_tokenizer, mock_hf_model
+
+
+def _setup_generate(mock_tokenizer: MagicMock, mock_hf_model: MagicMock, text: str) -> None:
+    """Configure mocks for a chat-template → generate → decode round-trip."""
+    mock_tokenizer.apply_chat_template.return_value = "<formatted prompt>"
+
+    # Simulate tokenizer returning _INPUT_LEN input token ids
+    fake_input_ids = torch.zeros(1, _INPUT_LEN, dtype=torch.long)
+    mock_tokenizer.return_value = {
+        "input_ids": fake_input_ids,
+        "attention_mask": torch.ones(1, _INPUT_LEN, dtype=torch.long),
+    }
+
+    # generate returns input_ids + new_ids (total length > _INPUT_LEN)
+    new_token_count = 5
+    fake_output_ids = torch.zeros(1, _INPUT_LEN + new_token_count, dtype=torch.long)
+    mock_hf_model.generate.return_value = fake_output_ids
+
+    mock_tokenizer.decode.return_value = text
+
+
+# ---------------------------------------------------------------------------
+# HuggingFaceClient — basic completion
+# ---------------------------------------------------------------------------
+
+
+class TestHuggingFaceClientComplete:
     def test_returns_text(self, tmp_path):
-        client = AnthropicClient(cache_dir=tmp_path / "llm")
-        with patch.object(
-            client._client.messages, "create",
-            return_value=_anthropic_response("SUPPORTS"),
-        ) as mock_api:
-            result = client.complete("Is Paris the capital of France?")
-        assert result == "SUPPORTS"
-        mock_api.assert_called_once()
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        assert client.complete("Is Paris the capital of France?") == "SUPPORTS"
+        mdl.generate.assert_called_once()
 
-    def test_cache_hit_skips_api(self, tmp_path):
-        client = AnthropicClient(cache_dir=tmp_path / "llm")
-        with patch.object(
-            client._client.messages, "create",
-            return_value=_anthropic_response("REFUTES"),
-        ) as mock_api:
-            first = client.complete("same prompt")
-            second = client.complete("same prompt")
+    def test_cache_hit_skips_model(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "REFUTES")
+        first = client.complete("same prompt")
+        second = client.complete("same prompt")
         assert first == second == "REFUTES"
-        mock_api.assert_called_once()  # second call served from cache
+        mdl.generate.assert_called_once()  # second call served from cache
 
-    def test_different_prompts_call_api_twice(self, tmp_path):
-        client = AnthropicClient(cache_dir=tmp_path / "llm")
-        with patch.object(
-            client._client.messages, "create",
-            side_effect=[_anthropic_response("SUPPORTS"), _anthropic_response("REFUTES")],
-        ) as mock_api:
-            r1 = client.complete("prompt A")
-            r2 = client.complete("prompt B")
-        assert r1 == "SUPPORTS"
-        assert r2 == "REFUTES"
-        assert mock_api.call_count == 2
+    def test_different_prompts_call_model_twice(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        tok.apply_chat_template.return_value = "<formatted>"
+        fake_input_ids = torch.zeros(1, _INPUT_LEN, dtype=torch.long)
+        tok.return_value = {
+            "input_ids": fake_input_ids,
+            "attention_mask": torch.ones(1, _INPUT_LEN, dtype=torch.long),
+        }
+        fake_output = torch.zeros(1, _INPUT_LEN + 3, dtype=torch.long)
+        mdl.generate.return_value = fake_output
+        tok.decode.side_effect = ["SUPPORTS", "REFUTES"]
+        assert client.complete("prompt A") == "SUPPORTS"
+        assert client.complete("prompt B") == "REFUTES"
+        assert mdl.generate.call_count == 2
 
+    def test_strips_whitespace_from_output(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "  SUPPORTS\n")
+        assert client.complete("any prompt") == "SUPPORTS"
 
-class TestAnthropicClientRetry:
-    def test_retries_on_rate_limit_then_succeeds(self, tmp_path):
-        client = AnthropicClient(cache_dir=tmp_path / "llm_retry")
-        side_effects = [_rate_limit_error(), _rate_limit_error(), _anthropic_response("SUPPORTS")]
-        with patch.object(client._client.messages, "create", side_effect=side_effects) as mock_api:
-            with patch("src.generation.llm_client.time.sleep"):
-                result = client.complete("retry prompt")
-        assert result == "SUPPORTS"
-        assert mock_api.call_count == 3
-
-    def test_no_retry_on_auth_error(self, tmp_path):
-        client = AnthropicClient(cache_dir=tmp_path / "llm_auth")
-        with patch.object(
-            client._client.messages, "create", side_effect=_auth_error(),
-        ) as mock_api:
-            with patch("src.generation.llm_client.time.sleep"):
-                with pytest.raises(Exception, match="invalid api key"):
-                    client.complete("fail prompt")
-        mock_api.assert_called_once()  # raised immediately, no retry
-
-    def test_retry_exhaustion_raises(self, tmp_path):
-        """After MAX_RETRIES+1 transient failures the last exception is raised."""
-        client = AnthropicClient(cache_dir=tmp_path / "llm_exhaust")
-        side_effects = [_rate_limit_error()] * 5  # 1 initial + 4 retries = 5
-        with patch.object(client._client.messages, "create", side_effect=side_effects) as mock_api:
-            with patch("src.generation.llm_client.time.sleep"):
-                with pytest.raises(Exception, match="rate limit"):
-                    client.complete("exhaust prompt")
-        assert mock_api.call_count == 5
-
-    @pytest.mark.parametrize("status", [500, 503])
-    def test_retries_on_server_error(self, tmp_path, status):
-        """Transient server errors (500, 503) are retried like 429."""
-        client = AnthropicClient(cache_dir=tmp_path / f"llm_{status}")
-        err = Exception(f"server error {status}")
-        err.status_code = status  # type: ignore[attr-defined]
-        side_effects = [err, _anthropic_response("SUPPORTS")]
-        with patch.object(client._client.messages, "create", side_effect=side_effects):
-            with patch("src.generation.llm_client.time.sleep"):
-                result = client.complete("server error prompt")
-        assert result == "SUPPORTS"
-
-    def test_no_retry_on_programming_error(self, tmp_path):
-        """Exceptions without HTTP status (e.g. TypeError) must not be retried."""
-        client = AnthropicClient(cache_dir=tmp_path / "llm_prog")
-        with patch.object(
-            client._client.messages, "create", side_effect=TypeError("bad arg"),
-        ) as mock_api:
-            with patch("src.generation.llm_client.time.sleep"):
-                with pytest.raises(TypeError, match="bad arg"):
-                    client.complete("prog error prompt")
-        mock_api.assert_called_once()
+    def test_decode_called_on_new_tokens_only(self, tmp_path):
+        """decode must receive only the sliced new tokens, not the full sequence."""
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("test")
+        decode_call_arg = tok.decode.call_args[0][0]
+        # The decoded tensor must have length == total_output - input_length
+        assert len(decode_call_arg) == 5  # new_token_count set in _setup_generate
 
 
 # ---------------------------------------------------------------------------
-# OpenAIClient
+# HuggingFaceClient — chat template
 # ---------------------------------------------------------------------------
 
 
-class TestOpenAIClientComplete:
-    """openai.OpenAI() validates the API key at construction time, so we patch
-    the constructor to avoid requiring OPENAI_API_KEY in CI/tests."""
+class TestChatTemplate:
+    def test_apply_chat_template_called(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("my prompt")
+        tok.apply_chat_template.assert_called_once()
+        call_args = tok.apply_chat_template.call_args
+        messages = call_args[0][0]
+        assert messages == [{"role": "user", "content": "my prompt"}]
 
-    def test_returns_text(self, tmp_path):
-        with patch("openai.OpenAI") as mock_cls:
-            mock_instance = MagicMock()
-            mock_cls.return_value = mock_instance
-            client = OpenAIClient(cache_dir=tmp_path / "llm_oai")
-            mock_instance.chat.completions.create.return_value = _openai_response("NOT ENOUGH INFO")
-            result = client.complete("openai prompt")
-        assert result == "NOT ENOUGH INFO"
-        mock_instance.chat.completions.create.assert_called_once()
+    def test_add_generation_prompt_true(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("prompt")
+        kwargs = tok.apply_chat_template.call_args[1]
+        assert kwargs.get("add_generation_prompt") is True
 
-    def test_cache_hit_skips_api(self, tmp_path):
-        with patch("openai.OpenAI") as mock_cls:
-            mock_instance = MagicMock()
-            mock_cls.return_value = mock_instance
-            client = OpenAIClient(cache_dir=tmp_path / "llm_oai_cache")
-            mock_instance.chat.completions.create.return_value = _openai_response("SUPPORTS")
-            first = client.complete("cached openai prompt")
-            second = client.complete("cached openai prompt")
-        assert first == second == "SUPPORTS"
-        mock_instance.chat.completions.create.assert_called_once()  # second call from cache
+
+# ---------------------------------------------------------------------------
+# HuggingFaceClient — pad_token_id fallback
+# ---------------------------------------------------------------------------
+
+
+class TestPadTokenId:
+    def test_pad_token_set_to_eos_when_missing(self, tmp_path):
+        with (
+            patch("src.generation.llm_client.AutoTokenizer") as mock_tok_cls,
+            patch("src.generation.llm_client.AutoModelForCausalLM") as mock_model_cls,
+            patch("src.generation.llm_client._get_device", return_value="cpu"),
+        ):
+            mock_tokenizer = MagicMock()
+            mock_tok_cls.from_pretrained.return_value = mock_tokenizer
+            mock_tokenizer.pad_token_id = None   # missing — should be overridden
+            mock_tokenizer.eos_token_id = 42
+
+            mock_hf_model = MagicMock()
+            mock_model_cls.from_pretrained.return_value = mock_hf_model
+            mock_hf_model.to.return_value = mock_hf_model
+
+            HuggingFaceClient(cache_dir=tmp_path / "llm")
+
+        assert mock_tokenizer.pad_token_id == 42
+
+    def test_pad_token_not_overridden_when_present(self, tmp_path):
+        with (
+            patch("src.generation.llm_client.AutoTokenizer") as mock_tok_cls,
+            patch("src.generation.llm_client.AutoModelForCausalLM") as mock_model_cls,
+            patch("src.generation.llm_client._get_device", return_value="cpu"),
+        ):
+            mock_tokenizer = MagicMock()
+            mock_tok_cls.from_pretrained.return_value = mock_tokenizer
+            mock_tokenizer.pad_token_id = 7   # already set
+            mock_tokenizer.eos_token_id = 99
+
+            mock_hf_model = MagicMock()
+            mock_model_cls.from_pretrained.return_value = mock_hf_model
+            mock_hf_model.to.return_value = mock_hf_model
+
+            HuggingFaceClient(cache_dir=tmp_path / "llm")
+
+        assert mock_tokenizer.pad_token_id == 7  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# HuggingFaceClient — generation parameters
+# ---------------------------------------------------------------------------
+
+
+class TestHuggingFaceClientGenerationParams:
+    def test_greedy_when_temperature_zero(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path, temperature=0.0)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("greedy prompt")
+        gen_kwargs = mdl.generate.call_args[1]
+        assert gen_kwargs.get("do_sample") is False
+
+    def test_sampling_when_temperature_nonzero(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path, temperature=0.7)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("sample prompt")
+        gen_kwargs = mdl.generate.call_args[1]
+        assert gen_kwargs.get("do_sample") is True
+        assert gen_kwargs.get("temperature") == pytest.approx(0.7)
+
+    def test_truncation_always_enabled(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("long prompt")
+        tok_call_kwargs = tok.call_args[1]
+        assert tok_call_kwargs.get("truncation") is True
+
+    def test_max_tokens_passed_to_generate(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path, max_tokens=64)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("prompt")
+        gen_kwargs = mdl.generate.call_args[1]
+        assert gen_kwargs.get("max_new_tokens") == 64
 
 
 # ---------------------------------------------------------------------------
@@ -178,13 +241,16 @@ class TestOpenAIClientComplete:
 
 class TestCacheKey:
     def test_deterministic(self):
-        assert _cache_key("p", "m", 0.0) == _cache_key("p", "m", 0.0)
+        assert _cache_key("p", "m", 0.0, 64) == _cache_key("p", "m", 0.0, 64)
 
     def test_sensitive_to_model(self):
-        assert _cache_key("p", "model-a", 0.0) != _cache_key("p", "model-b", 0.0)
+        assert _cache_key("p", "model-a", 0.0, 64) != _cache_key("p", "model-b", 0.0, 64)
 
     def test_sensitive_to_temperature(self):
-        assert _cache_key("p", "m", 0.0) != _cache_key("p", "m", 0.7)
+        assert _cache_key("p", "m", 0.0, 64) != _cache_key("p", "m", 0.7, 64)
 
     def test_sensitive_to_prompt(self):
-        assert _cache_key("prompt-1", "m", 0.0) != _cache_key("prompt-2", "m", 0.0)
+        assert _cache_key("prompt-1", "m", 0.0, 64) != _cache_key("prompt-2", "m", 0.0, 64)
+
+    def test_sensitive_to_max_tokens(self):
+        assert _cache_key("p", "m", 0.0, 64) != _cache_key("p", "m", 0.0, 256)

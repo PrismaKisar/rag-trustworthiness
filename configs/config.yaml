@@ -19,10 +19,13 @@ poisoning:
 
 # --- Models ---
 models:
-  default: "claude-haiku-4-5-20251001"
+  default: "Qwen/Qwen2.5-1.5B-Instruct"
   available:
-    - "claude-haiku-4-5-20251001"
-    - "gpt-4o-mini"
+    - "Qwen/Qwen2.5-1.5B-Instruct"
+    - "meta-llama/Llama-3.2-3B-Instruct"
+    - "HuggingFaceTB/SmolLM2-1.7B-Instruct"
+    - "google/gemma-2-2b-it"
+    - "microsoft/Phi-3.5-mini-instruct"
   temperature: 0.0            # 0.0 for deterministic; >0 required for self-consistency runs
   temperature_consistency: 0.7
 
@@ -46,7 +49,6 @@ cache:
   embeddings_subdir: "embeddings"
   llm_subdir: "llm_responses"
 
-# --- API Budget ---
-api_budget:
-  max_calls: 3300
-  note: "3000 main experiment + 300 self-consistency. Re-runs are near-free due to caching."
+# --- Inference ---
+inference:
+  note: "Using local HuggingFace models — no API cost. Inference time is the bottleneck. Re-runs are near-free due to caching."

@@ -3,9 +3,9 @@ faiss-cpu>=1.9.0
 sentence-transformers>=3.0.0
 numpy>=2.0.0
 
-# --- LLM APIs ---
-anthropic>=0.50.0
-openai>=1.60.0
+# --- LLM (local, no API key required) ---
+transformers>=4.40.0
+accelerate>=0.30.0
 
 # --- Data ---
 polars>=1.0.0
