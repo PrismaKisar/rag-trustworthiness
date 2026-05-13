@@ -22,10 +22,10 @@ models:
   default: "Qwen/Qwen2.5-1.5B-Instruct"
   available:
     - "Qwen/Qwen2.5-1.5B-Instruct"
-    - "meta-llama/Llama-3.2-3B-Instruct"
-    - "HuggingFaceTB/SmolLM2-1.7B-Instruct"
     - "google/gemma-2-2b-it"
+    - "HuggingFaceTB/SmolLM2-1.7B-Instruct"
     - "microsoft/Phi-3.5-mini-instruct"
+    - "meta-llama/Llama-3.2-3B-Instruct"
   temperature: 0.0            # 0.0 for deterministic; >0 required for self-consistency runs
   temperature_consistency: 0.7
 
