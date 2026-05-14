@@ -168,17 +168,40 @@ class HuggingFaceClient(LLMClient):
         super().__init__(model=model, temperature=temperature, cache_dir=cache_dir)
         self._max_tokens = max_tokens
         self._device = _get_device()
+        self._hf_model = None
+        self._tokenizer = None
+        self._inference_lock = threading.Lock()
+
+    def _load_model(self) -> None:
         dtype = torch.float16 if self._device in ("cuda", "mps") else torch.float32
-        self._tokenizer = AutoTokenizer.from_pretrained(model)
+        self._tokenizer = AutoTokenizer.from_pretrained(self._model)
         if self._tokenizer.pad_token_id is None:
             self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
-        # device_map loads directly onto the target device, avoiding the
-        # double-memory spike that occurs when loading to CPU then calling .to(device).
+        # low_cpu_mem_usage loads shards sequentially to avoid the full fp32
+        # copy in RAM; explicit .to() then moves to target device in one step.
         self._hf_model = AutoModelForCausalLM.from_pretrained(
-            model, dtype=dtype, device_map=self._device
-        )
+            self._model, torch_dtype=dtype, low_cpu_mem_usage=True
+        ).to(self._device)
+
+    def close(self) -> None:
+        if self._hf_model is not None:
+            del self._hf_model
+            del self._tokenizer
+            self._hf_model = None
+            self._tokenizer = None
+            if self._device == "mps":
+                torch.mps.empty_cache()
+            elif self._device == "cuda":
+                torch.cuda.empty_cache()
+        super().close()
 
     def _call_api(self, prompt: str, max_tokens: int | None = None) -> str:
+        with self._inference_lock:
+            if self._hf_model is None:
+                self._load_model()
+            return self._generate(prompt, max_tokens)
+
+    def _generate(self, prompt: str, max_tokens: int | None = None) -> str:
         messages = [{"role": "user", "content": prompt}]
         input_text = self._tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
@@ -188,7 +211,10 @@ class HuggingFaceClient(LLMClient):
         )
         input_length = inputs["input_ids"].shape[1]
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
-        gen_kwargs: dict = {"max_new_tokens": max_tokens or self._max_tokens}
+        gen_kwargs: dict = {
+            "max_new_tokens": max_tokens or self._max_tokens,
+            "pad_token_id": self._tokenizer.eos_token_id,
+        }
         if self._temperature > 0:
             gen_kwargs["do_sample"] = True
             gen_kwargs["temperature"] = self._temperature
