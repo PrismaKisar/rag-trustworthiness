@@ -3,4 +3,5 @@ __pycache__/
 .env
 .cache/
 data/fever/
+data/hotpotqa/
 figures/

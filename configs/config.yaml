@@ -3,8 +3,10 @@ seed: 42
 
 # --- Dataset ---
 dataset:
+  default: "fever"            # one of: fever, hotpotqa (overridable via CLI)
   fever_dev: "data/fever/dev.jsonl"
   fever_train: "data/fever/train.jsonl"
+  hotpotqa_dev: "data/hotpotqa/dev.jsonl"
 
 # --- Retrieval ---
 retrieval:
@@ -31,11 +33,15 @@ models:
 
 # --- Prompts ---
 prompts:
-  default: "standard"         # one of: standard, chain_of_thought, vigilant
+  default: "standard"         # FEVER prompts: standard, chain_of_thought, vigilant
+  default_qa: "standard_qa"   # HotpotQA prompts: standard_qa, cot_qa, vigilant_qa
   max_tokens:
     standard: 64              # label only (~5 tokens), generous headroom
     chain_of_thought: 512     # reasoning + label, k=5 passages → ~500 tokens
     vigilant: 256             # consistency check (k=5 contradictions) + label → ~50-100 tokens
+    standard_qa: 64           # short free-form answer
+    cot_qa: 256               # reasoning + final short answer
+    vigilant_qa: 128          # consistency check + final short answer
 
 # --- Evaluation ---
 evaluation:
