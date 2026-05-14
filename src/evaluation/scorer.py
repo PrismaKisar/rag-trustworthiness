@@ -1,7 +1,12 @@
 """Scorer: run a model over FEVER examples and return evaluation metrics.
 
-Orchestrates the retrieve → prompt → generate → parse loop, then aggregates
-predictions through the metric functions from :mod:`src.evaluation.metrics`.
+Three-phase pipeline:
+    prepare_cases  — sequential retrieval → list[EvaluationCase]
+    resolve        — parallel LLM calls   → list[EvaluationResult]
+    aggregate      — pure metric rollup   → dict[str, float]
+
+run() is a thin composer over the three phases with the same public signature
+as before.
 
 Attribution:
     Sequential RAG pipeline for veracity prediction — Singal et al. 2024 §4.
@@ -17,6 +22,7 @@ import random
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from src.evaluation.cases import EvaluationCase, EvaluationResult
 from src.evaluation.metrics import (
     accuracy,
     hallucination_rate,
@@ -32,51 +38,46 @@ from src.retrieval.retriever import Retriever
 
 logger = logging.getLogger(__name__)
 
-
-_MAX_TOKENS: dict[str, int] = {
+_DEFAULT_MAX_TOKENS: dict[str, int] = {
     "standard": 64,
     "chain_of_thought": 512,
     "vigilant": 256,
 }
 
 
-def run(
+# ---------------------------------------------------------------------------
+# Phase 1 — retrieval (sequential: embedder / FAISS not thread-safe)
+# ---------------------------------------------------------------------------
+
+def prepare_cases(
     examples: list[dict],
     retriever: Retriever,
-    llm: LLMClient,
     prompt_type: PromptType = "standard",
+    sc_runs: int = 1,
     distractor_pool_size: int = 20,
+    max_tokens_by_prompt: dict[str, int] | None = None,
     seed: int = 42,
-    self_consistency_runs: int = 1,
-    n_workers: int = 4,
-) -> dict[str, float]:
-    """Run *llm* on every example and return aggregated metrics.
+) -> list[EvaluationCase]:
+    """Build one EvaluationCase per example via sequential retrieval.
 
     Args:
         examples: FEVER examples (keys: ``claim``, ``evidence``, ``label``).
-        retriever: :class:`~src.retrieval.retriever.Retriever` instance;
-                   index is rebuilt per example from a fresh corpus.
-        llm: LLM client implementing ``.complete(prompt) -> str``.
+        retriever: Retriever whose index is rebuilt per example.
         prompt_type: One of ``"standard"``, ``"chain_of_thought"``, ``"vigilant"``.
+        sc_runs: Number of prompts per case (passages shuffled between runs ≥2).
         distractor_pool_size: Distractor passages added to each example corpus.
+        max_tokens_by_prompt: Maps prompt_type → max_tokens budget.  Defaults
+                              to ``_DEFAULT_MAX_TOKENS`` when ``None``.
         seed: Base random seed for corpus building and passage shuffling.
-        self_consistency_runs: Inference runs per claim (≥1).  When > 1,
-                               retrieved passages are shuffled between runs
-                               and the majority label is the final prediction.
-        n_workers: Number of parallel threads for LLM calls. Retrieval remains
-                   sequential (embedder is not thread-safe).
 
     Returns:
-        Dict with keys ``accuracy``, ``macro_f1``, ``hallucination_rate``,
-        ``precision_at_k``, and ``self_consistency`` (only when
-        *self_consistency_runs* > 1).
+        List of :class:`~src.evaluation.cases.EvaluationCase` objects,
+        one per example, in the same order.
     """
-    # ------------------------------------------------------------------
-    # Phase 1 — retrieval (sequential: embedder / FAISS not thread-safe)
-    # ------------------------------------------------------------------
-    records: list[dict] = []
-    precisions: list[float] = []
+    tok_map = max_tokens_by_prompt if max_tokens_by_prompt is not None else _DEFAULT_MAX_TOKENS
+    max_tokens = tok_map.get(prompt_type, 256)
 
+    cases: list[EvaluationCase] = []
     for i, example in enumerate(examples):
         corpus = build_corpus(
             example=example,
@@ -87,60 +88,109 @@ def run(
         )
         retriever.build(corpus)
         passages = retriever.retrieve(example["claim"])
-
         gold_passages = [corpus.passages[j] for j in corpus.gold_indices]
-        precisions.append(precision_at_k(passages, gold_passages))
 
         rng = random.Random(seed + i)
-        runs_passages = [passages]
-        for _ in range(self_consistency_runs - 1):
-            p = list(passages)
-            rng.shuffle(p)
-            runs_passages.append(p)
+        prompts = [format_prompt(example["claim"], passages, prompt_type)]
+        for _ in range(sc_runs - 1):
+            shuffled = list(passages)
+            rng.shuffle(shuffled)
+            prompts.append(format_prompt(example["claim"], shuffled, prompt_type))
 
-        prompts = [format_prompt(example["claim"], p, prompt_type) for p in runs_passages]
-        records.append({"gold": example["label"], "prompts": prompts})
+        cases.append(EvaluationCase(
+            claim=example["claim"],
+            gold_label=example["label"],
+            passages=list(passages),
+            gold_passages=gold_passages,
+            prompts=prompts,
+            max_tokens=max_tokens,
+        ))
 
-    max_tokens = _MAX_TOKENS.get(prompt_type, 256)
+    return cases
 
-    # ------------------------------------------------------------------
-    # Phase 2 — LLM calls (parallel: I/O-bound, cache is thread-safe)
-    # ------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Phase 2 — LLM calls (parallel: I/O-bound, cache is thread-safe)
+# ---------------------------------------------------------------------------
+
+def resolve(
+    cases: list[EvaluationCase],
+    llm: LLMClient,
+    n_workers: int = 4,
+) -> list[EvaluationResult]:
+    """Dispatch LLM calls for every prompt in *cases* and return results.
+
+    Args:
+        cases: Output of :func:`prepare_cases`.
+        llm: LLM client implementing ``.complete(prompt, max_tokens) -> str``.
+        n_workers: Thread-pool size for parallel dispatch.
+
+    Returns:
+        List of :class:`~src.evaluation.cases.EvaluationResult` objects,
+        one per case, in the same order.
+    """
+    if not cases:
+        return []
+
     tasks = [
-        (rec_idx, run_idx, prompt)
-        for rec_idx, rec in enumerate(records)
-        for run_idx, prompt in enumerate(rec["prompts"])
+        (case_idx, run_idx, prompt, case.max_tokens)
+        for case_idx, case in enumerate(cases)
+        for run_idx, prompt in enumerate(case.prompts)
     ]
-    responses: dict[tuple[int, int], str] = {}
 
+    responses: dict[tuple[int, int], str] = {}
     with ThreadPoolExecutor(max_workers=min(n_workers, len(tasks))) as pool:
         future_to_key = {
-            pool.submit(llm.complete, prompt, max_tokens): (rec_idx, run_idx)
-            for rec_idx, run_idx, prompt in tasks
+            pool.submit(llm.complete, prompt, max_tokens): (case_idx, run_idx)
+            for case_idx, run_idx, prompt, max_tokens in tasks
         }
         for future in as_completed(future_to_key):
             key = future_to_key[future]
             responses[key] = extract_label(future.result())
 
-    # ------------------------------------------------------------------
-    # Phase 3 — aggregate
-    # ------------------------------------------------------------------
-    gold_labels: list[str] = []
-    predictions: list[str] = []
-    runs_per_claim: list[list[str]] = []
-
-    for rec_idx, rec in enumerate(records):
-        claim_runs = [responses[(rec_idx, j)] for j in range(len(rec["prompts"]))]
-        predicted = Counter(claim_runs).most_common(1)[0][0]
-        gold_labels.append(rec["gold"])
-        predictions.append(predicted)
-        if self_consistency_runs > 1:
-            runs_per_claim.append(claim_runs)
-
+    results: list[EvaluationResult] = []
+    for case_idx, case in enumerate(cases):
+        runs = [responses[(case_idx, j)] for j in range(len(case.prompts))]
+        predicted = Counter(runs).most_common(1)[0][0]
         logger.debug(
-            "Example %d/%d  gold=%s  pred=%s",
-            rec_idx + 1, len(records), rec["gold"], predicted,
+            "Case %d/%d  gold=%s  pred=%s",
+            case_idx + 1, len(cases), case.gold_label, predicted,
         )
+        results.append(EvaluationResult(
+            case_index=case_idx,
+            runs=runs,
+            predicted_label=predicted,
+        ))
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — aggregate
+# ---------------------------------------------------------------------------
+
+def aggregate(
+    cases: list[EvaluationCase],
+    results: list[EvaluationResult],
+) -> dict[str, float]:
+    """Compute evaluation metrics from *cases* and *results*.
+
+    Pure function — no I/O, no randomness.
+
+    Args:
+        cases: Output of :func:`prepare_cases`.
+        results: Output of :func:`resolve`, same order as *cases*.
+
+    Returns:
+        Dict with ``accuracy``, ``macro_f1``, ``hallucination_rate``,
+        ``precision_at_k``, and ``self_consistency`` (only when sc_runs > 1).
+    """
+    gold_labels = [case.gold_label for case in cases]
+    predictions = [result.predicted_label for result in results]
+    precisions = [
+        precision_at_k(case.passages, case.gold_passages)
+        for case in cases
+    ]
 
     metrics: dict[str, float] = {
         "accuracy": accuracy(predictions, gold_labels),
@@ -148,7 +198,41 @@ def run(
         "hallucination_rate": hallucination_rate(predictions, gold_labels),
         "precision_at_k": sum(precisions) / len(precisions) if precisions else 0.0,
     }
-    if self_consistency_runs > 1:
-        metrics["self_consistency"] = self_consistency(runs_per_claim)
+
+    if cases and len(cases[0].prompts) > 1:
+        metrics["self_consistency"] = self_consistency([r.runs for r in results])
 
     return metrics
+
+
+# ---------------------------------------------------------------------------
+# Composer — preserves the original public signature
+# ---------------------------------------------------------------------------
+
+def run(
+    examples: list[dict],
+    retriever: Retriever,
+    llm: LLMClient,
+    prompt_type: PromptType = "standard",
+    distractor_pool_size: int = 20,
+    seed: int = 42,
+    self_consistency_runs: int = 1,
+    n_workers: int = 4,
+    max_tokens_by_prompt: dict[str, int] | None = None,
+) -> dict[str, float]:
+    """Run *llm* on every example and return aggregated metrics.
+
+    Thin composer over :func:`prepare_cases`, :func:`resolve`, :func:`aggregate`.
+    See those functions for parameter documentation.
+    """
+    cases = prepare_cases(
+        examples=examples,
+        retriever=retriever,
+        prompt_type=prompt_type,
+        sc_runs=self_consistency_runs,
+        distractor_pool_size=distractor_pool_size,
+        max_tokens_by_prompt=max_tokens_by_prompt,
+        seed=seed,
+    )
+    results = resolve(cases, llm, n_workers=n_workers)
+    return aggregate(cases, results)
