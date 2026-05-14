@@ -146,3 +146,67 @@ class TestPrecisionAtK:
 
     def test_empty_gold(self):
         assert precision_at_k(["p1", "p2"], []) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# exact_match (QA — HotpotQA)
+# ---------------------------------------------------------------------------
+
+
+class TestExactMatch:
+    def test_identical(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("Switzerland", "Switzerland") == 1.0
+
+    def test_case_insensitive(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("switzerland", "Switzerland") == 1.0
+
+    def test_strips_articles(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("the eiffel tower", "Eiffel Tower") == 1.0
+
+    def test_strips_punctuation(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("Switzerland.", "Switzerland") == 1.0
+
+    def test_collapses_whitespace(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("Arthur  C.   Clarke", "Arthur C Clarke") == 1.0
+
+    def test_mismatch(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("France", "Switzerland") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# token_f1 (QA — HotpotQA)
+# ---------------------------------------------------------------------------
+
+
+class TestTokenF1:
+    def test_perfect_match(self):
+        from src.evaluation.metrics import token_f1
+        assert token_f1("Marie Curie", "Marie Curie") == pytest.approx(1.0)
+
+    def test_no_overlap(self):
+        from src.evaluation.metrics import token_f1
+        assert token_f1("dog", "cat") == 0.0
+
+    def test_partial_overlap(self):
+        # pred tokens: {arthur, clarke}; gold tokens: {arthur, c, clarke}
+        # precision = 2/2 = 1.0, recall = 2/3, f1 = 2*1*(2/3)/(1+2/3) = 0.8
+        from src.evaluation.metrics import token_f1
+        assert token_f1("Arthur Clarke", "Arthur C Clarke") == pytest.approx(0.8)
+
+    def test_normalises_like_em(self):
+        from src.evaluation.metrics import token_f1
+        assert token_f1("THE Eiffel, Tower.", "eiffel tower") == pytest.approx(1.0)
+
+    def test_empty_prediction_returns_zero(self):
+        from src.evaluation.metrics import token_f1
+        assert token_f1("", "Marie Curie") == 0.0
+
+    def test_empty_gold_returns_zero(self):
+        from src.evaluation.metrics import token_f1
+        assert token_f1("Marie Curie", "") == 0.0

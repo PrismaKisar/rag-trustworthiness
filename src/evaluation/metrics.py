@@ -8,9 +8,47 @@ Metrics defined in "the pipeline.md" §5, grounded in:
 
 from __future__ import annotations
 
+import re
+import string
 from collections import Counter
 
 LABELS = ("SUPPORTS", "REFUTES", "NOT ENOUGH INFO")
+
+_ARTICLES_RE = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
+_PUNCT_TRANS = str.maketrans("", "", string.punctuation)
+_WS_RE = re.compile(r"\s+")
+
+
+def _normalise_answer(s: str) -> str:
+    """SQuAD-style normalisation: lowercase, strip punctuation/articles, collapse whitespace.
+
+    Attribution: Rajpurkar et al. 2016 (SQuAD), adopted by HotpotQA evaluation.
+    """
+    s = s.lower()
+    s = s.translate(_PUNCT_TRANS)
+    s = _ARTICLES_RE.sub(" ", s)
+    s = _WS_RE.sub(" ", s).strip()
+    return s
+
+
+def exact_match(prediction: str, gold: str) -> float:
+    """1.0 if normalised *prediction* equals normalised *gold*, else 0.0."""
+    return float(_normalise_answer(prediction) == _normalise_answer(gold))
+
+
+def token_f1(prediction: str, gold: str) -> float:
+    """Token-level F1 between normalised *prediction* and *gold* (HotpotQA-style)."""
+    pred_tokens = _normalise_answer(prediction).split()
+    gold_tokens = _normalise_answer(gold).split()
+    if not pred_tokens or not gold_tokens:
+        return 0.0
+    common = Counter(pred_tokens) & Counter(gold_tokens)
+    overlap = sum(common.values())
+    if overlap == 0:
+        return 0.0
+    precision = overlap / len(pred_tokens)
+    recall = overlap / len(gold_tokens)
+    return 2 * precision * recall / (precision + recall)
 
 
 def accuracy(predictions: list[str], gold_labels: list[str]) -> float:

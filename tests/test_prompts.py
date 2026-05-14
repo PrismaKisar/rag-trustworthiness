@@ -130,3 +130,69 @@ class TestEdgeCases:
         prompt_default = format_prompt(CLAIM, PASSAGES)
         prompt_standard = format_prompt(CLAIM, PASSAGES, "standard")
         assert prompt_default == prompt_standard
+
+
+# ---------------------------------------------------------------------------
+# QA prompts (HotpotQA)
+# ---------------------------------------------------------------------------
+
+QUESTION = "Where was Marie Curie born?"
+QA_PASSAGES = [
+    "Marie Curie was born in Warsaw, Poland on 7 November 1867.",
+    "She moved to Paris to study at the Sorbonne in 1891.",
+]
+
+
+class TestStandardQAPrompt:
+    def test_contains_question(self):
+        from src.generation.prompts import format_qa_prompt
+        prompt = format_qa_prompt(QUESTION, QA_PASSAGES, "standard_qa")
+        assert QUESTION in prompt
+
+    def test_contains_all_passages(self):
+        from src.generation.prompts import format_qa_prompt
+        prompt = format_qa_prompt(QUESTION, QA_PASSAGES, "standard_qa")
+        for p in QA_PASSAGES:
+            assert p in prompt
+
+    def test_has_answer_marker(self):
+        from src.generation.prompts import format_qa_prompt
+        prompt = format_qa_prompt(QUESTION, QA_PASSAGES, "standard_qa")
+        assert "Answer:" in prompt
+
+
+class TestCotQAPrompt:
+    def test_has_reasoning_marker(self):
+        from src.generation.prompts import format_qa_prompt
+        prompt = format_qa_prompt(QUESTION, QA_PASSAGES, "cot_qa")
+        assert "Reasoning:" in prompt
+
+    def test_has_final_answer_marker(self):
+        from src.generation.prompts import format_qa_prompt
+        prompt = format_qa_prompt(QUESTION, QA_PASSAGES, "cot_qa")
+        assert "Final Answer" in prompt
+
+
+class TestVigilantQAPrompt:
+    def test_has_consistency_marker(self):
+        from src.generation.prompts import format_qa_prompt
+        prompt = format_qa_prompt(QUESTION, QA_PASSAGES, "vigilant_qa")
+        assert "Consistency check:" in prompt
+
+    def test_has_final_answer_marker(self):
+        from src.generation.prompts import format_qa_prompt
+        prompt = format_qa_prompt(QUESTION, QA_PASSAGES, "vigilant_qa")
+        assert "Final Answer" in prompt
+
+
+class TestQAPromptEdgeCases:
+    def test_invalid_qa_prompt_type_raises(self):
+        from src.generation.prompts import format_qa_prompt
+        with pytest.raises(ValueError, match="Unknown prompt_type"):
+            format_qa_prompt(QUESTION, QA_PASSAGES, "bogus")
+
+    def test_passages_numbered(self):
+        from src.generation.prompts import format_qa_prompt
+        prompt = format_qa_prompt(QUESTION, QA_PASSAGES, "standard_qa")
+        assert "1." in prompt
+        assert "2." in prompt

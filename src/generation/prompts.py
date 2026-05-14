@@ -57,6 +57,52 @@ _TEMPLATES: dict[PromptType, str] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# QA prompt templates (HotpotQA)
+# ---------------------------------------------------------------------------
+
+QAPromptType = Literal["standard_qa", "cot_qa", "vigilant_qa"]
+
+_STANDARD_QA = """\
+You are answering a question using only the given passages. Reply with the \
+shortest possible answer (a name, entity, or short phrase) — no explanation.
+
+Question: {question}
+Passages:
+{passages}
+
+Answer:"""
+
+_COT_QA = """\
+You are answering a question using the given passages. Think step by step \
+across the passages, then give the shortest possible final answer.
+
+Question: {question}
+Passages:
+{passages}
+
+Reasoning: [think through each passage and combine the evidence]
+Final Answer:"""
+
+_VIGILANT_QA = """\
+You are answering a question using the given passages. First check whether \
+the passages are consistent with each other. If they contradict each other, \
+note it before deciding. Then give the shortest possible final answer.
+
+Question: {question}
+Passages:
+{passages}
+
+Consistency check: [are passages consistent?]
+Final Answer:"""
+
+_QA_TEMPLATES: dict[QAPromptType, str] = {
+    "standard_qa": _STANDARD_QA,
+    "cot_qa": _COT_QA,
+    "vigilant_qa": _VIGILANT_QA,
+}
+
+
 def format_prompt(
     claim: str,
     passages: list[str],
@@ -82,3 +128,18 @@ def format_prompt(
         )
     numbered = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(passages))
     return _TEMPLATES[prompt_type].format(claim=claim, passages=numbered)
+
+
+def format_qa_prompt(
+    question: str,
+    passages: list[str],
+    prompt_type: QAPromptType = "standard_qa",
+) -> str:
+    """Format a QA prompt for HotpotQA-style open-answer evaluation."""
+    if prompt_type not in _QA_TEMPLATES:
+        raise ValueError(
+            f"Unknown prompt_type {prompt_type!r}. "
+            f"Choose from: {sorted(_QA_TEMPLATES)}"
+        )
+    numbered = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(passages))
+    return _QA_TEMPLATES[prompt_type].format(question=question, passages=numbered)

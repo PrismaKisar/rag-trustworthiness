@@ -156,3 +156,104 @@ def test_pipeline_no_poison_skips_poisoner(mock_llm):
         ])
 
     mock_poison.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# HotpotQA routing
+# ---------------------------------------------------------------------------
+
+FAKE_HOTPOT_EXAMPLES = [
+    {
+        "question": "Where was Marie Curie born?",
+        "answer": "Warsaw",
+        "supporting_facts": [["Marie Curie", 0]],
+        "context": [
+            ["Marie Curie", ["Marie Curie was born in Warsaw.", "She won Nobel prizes."]],
+            ["Distractor", ["Unrelated content here.", "More filler."]],
+        ],
+    },
+    {
+        "question": "Who wrote 2001: A Space Odyssey?",
+        "answer": "Arthur C. Clarke",
+        "supporting_facts": [["Clarke", 0]],
+        "context": [
+            ["Clarke", ["Arthur C. Clarke was a British author.", "He co-wrote the screenplay."]],
+            ["Distractor", ["Unrelated content.", "More filler text."]],
+        ],
+    },
+]
+
+
+def test_pipeline_routes_to_hotpotqa(tmp_path):
+    """--dataset hotpotqa loads HotpotQA, runs qa_scorer, returns QA metrics."""
+    mock_llm = MagicMock()
+    mock_llm.complete.side_effect = ["Answer: Warsaw", "Answer: Arthur C. Clarke"]
+
+    with (
+        patch("src.pipeline.load_hotpotqa", return_value=FAKE_HOTPOT_EXAMPLES) as mock_load,
+        patch("src.pipeline.load_fever") as mock_fever_load,
+        patch("src.pipeline.Embedder") as MockEmbedder,
+        patch("src.pipeline._build_llm", return_value=mock_llm),
+    ):
+        import numpy as np
+
+        embedder_instance = MagicMock()
+        embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
+            (len(texts), 384)
+        ).astype("float32")
+        embedder_instance.embedding_dim = 384
+        MockEmbedder.return_value = embedder_instance
+
+        metrics = main([
+            "--config", "configs/config.yaml",
+            "--dataset", "hotpotqa",
+            "--n", "2",
+            "--poison_rate", "0.0",
+            "--model", "claude-haiku-4-5-20251001",
+            "--prompt_type", "standard_qa",
+            "--seed", "42",
+            "--self_consistency_runs", "1",
+        ])
+
+    mock_load.assert_called_once()
+    mock_fever_load.assert_not_called()
+    assert {"exact_match", "token_f1", "precision_at_k"} <= metrics.keys()
+    for key in ("exact_match", "token_f1", "precision_at_k"):
+        assert 0.0 <= metrics[key] <= 1.0
+
+
+def test_pipeline_hotpotqa_poisoner_invoked(tmp_path):
+    """When dataset=hotpotqa and poison_rate>0, the HotpotQA poisoner runs."""
+    mock_llm = MagicMock()
+    mock_llm.complete.side_effect = ["Answer: x"] * 4
+
+    with (
+        patch("src.pipeline.load_hotpotqa", return_value=FAKE_HOTPOT_EXAMPLES),
+        patch("src.pipeline.Embedder") as MockEmbedder,
+        patch("src.pipeline._build_llm", return_value=mock_llm),
+        patch("src.pipeline.poison_hotpotqa", wraps=lambda ex, **kw: ex) as mock_poison,
+        patch("src.pipeline.poison_dataset") as mock_fever_poison,
+    ):
+        import numpy as np
+
+        embedder_instance = MagicMock()
+        embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
+            (len(texts), 384)
+        ).astype("float32")
+        embedder_instance.embedding_dim = 384
+        MockEmbedder.return_value = embedder_instance
+
+        main([
+            "--config", "configs/config.yaml",
+            "--dataset", "hotpotqa",
+            "--n", "2",
+            "--poison_rate", "0.5",
+            "--model", "claude-haiku-4-5-20251001",
+            "--prompt_type", "standard_qa",
+            "--self_consistency_runs", "1",
+        ])
+
+    mock_poison.assert_called_once()
+    mock_fever_poison.assert_not_called()
+    _, kwargs = mock_poison.call_args
+    assert kwargs["poison_rate"] == 0.5

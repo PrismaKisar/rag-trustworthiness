@@ -27,6 +27,29 @@ _KEYWORD_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+_FINAL_ANSWER_RE = re.compile(
+    r"(?:final\s+)?answer\s*[:\-]\s*(.+?)(?:\n|$)",
+    re.IGNORECASE,
+)
+
+
+def extract_answer(text: str) -> str:
+    """Extract a free-form answer string from an LLM QA response.
+
+    Strategy:
+      1. Look for "Final Answer:" / "Answer:" marker (greedy match: prefer the
+         last one when multiple markers exist).
+      2. Strip surrounding whitespace and one trailing period.
+      3. Fall back to the stripped full text when no marker is present.
+    """
+    matches = list(_FINAL_ANSWER_RE.finditer(text))
+    raw = matches[-1].group(1) if matches else text
+    cleaned = raw.strip()
+    if cleaned.endswith("."):
+        cleaned = cleaned[:-1].rstrip()
+    return cleaned
+
+
 def extract_label(text: str) -> str:
     """Extract a FEVER label from *text*.
 
