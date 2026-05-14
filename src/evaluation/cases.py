@@ -24,3 +24,24 @@ class EvaluationResult:
     case_index: int
     runs: list[str]
     predicted_label: str
+
+
+@dataclass(frozen=True)
+class QACase:
+    """Unit of work for one HotpotQA question evaluation."""
+
+    question: str
+    gold_answer: str
+    passages: list[str]
+    gold_passages: list[str]
+    prompts: list[str]
+    max_tokens: int
+
+
+@dataclass(frozen=True)
+class QAResult:
+    """Output of resolving one QACase against an LLM."""
+
+    case_index: int
+    runs: list[str]
+    predicted_answer: str
