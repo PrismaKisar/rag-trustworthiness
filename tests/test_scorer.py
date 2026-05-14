@@ -48,8 +48,16 @@ class TestRunBasic:
             assert 0.0 <= val <= 1.0
 
     def test_perfect_accuracy(self):
+        # Map each claim to the correct label — order-independent under parallel dispatch.
+        label_by_claim = {
+            "The sky is blue.": "SUPPORTS",
+            "Cats can fly.": "REFUTES",
+            "Unknown fact.": "NOT ENOUGH INFO",
+        }
         llm = MagicMock()
-        llm.complete.side_effect = ["SUPPORTS", "REFUTES", "NOT ENOUGH INFO"]
+        llm.complete.side_effect = lambda prompt, _max=None: next(
+            v for k, v in label_by_claim.items() if k in prompt
+        )
         result = scorer.run(EXAMPLES, _retriever(), llm, prompt_type="standard")
         assert result["accuracy"] == pytest.approx(1.0)
 
@@ -151,7 +159,7 @@ class TestPoisoningDegradation:
         gold_snippets = {"Paris is located in France.", "Rome is the capital of Italy."}
         llm = MagicMock()
 
-        def _complete(prompt):
+        def _complete(prompt, _max=None):
             for snippet in gold_snippets:
                 if snippet in prompt:
                     if "Paris" in prompt:
