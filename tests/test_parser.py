@@ -62,3 +62,46 @@ class TestDefault:
 
     def test_empty_string(self):
         assert extract_label("") == "NOT ENOUGH INFO"
+
+
+# ---------------------------------------------------------------------------
+# extract_answer — HotpotQA QA output
+# ---------------------------------------------------------------------------
+
+
+class TestExtractAnswer:
+    def test_final_answer_marker(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("Reasoning: ...\nFinal Answer: Switzerland") == "Switzerland"
+
+    def test_answer_marker(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("Answer: Marie Curie") == "Marie Curie"
+
+    def test_case_insensitive_marker(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("answer: paris") == "paris"
+
+    def test_strips_surrounding_whitespace(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("Final Answer:   Arthur C. Clarke   ") == "Arthur C. Clarke"
+
+    def test_strips_trailing_period(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("Answer: Switzerland.") == "Switzerland"
+
+    def test_stops_at_newline(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("Answer: Paris\nExtra commentary.") == "Paris"
+
+    def test_no_marker_returns_full_text_stripped(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("  Switzerland  ") == "Switzerland"
+
+    def test_empty_string(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("") == ""
+
+    def test_dash_separator(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("Final Answer - Berlin") == "Berlin"
