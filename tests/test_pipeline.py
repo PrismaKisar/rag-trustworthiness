@@ -257,16 +257,120 @@ def test_pipeline_routes_to_hotpotqa(tmp_path):
         assert 0.0 <= metrics[key] <= 1.0
 
 
+# ---------------------------------------------------------------------------
+# Candidate #3: DatasetRunner deepened — loader + task + poisoner fields
+# ---------------------------------------------------------------------------
+
+
+class _FakeCase:
+    prompts = ["prompt_0"]
+    max_tokens = 64
+
+
+class _TraceTask:
+    def build_cases(self, examples, retriever, prompt_type, sc_runs, seed, **kwargs):
+        return []
+
+    def parse_result(self, case_index, raw_runs):
+        return None
+
+    def compute_metrics(self, cases, results, prompt_type):
+        return {"tracer_metric": 0.5}
+
+
+class TestDatasetRunnerNewInterface:
+    def test_loader_field_called_and_metrics_returned(self):
+        """DatasetRunner dispatches via loader + task; loader provides examples."""
+        import numpy as np
+        from src.pipeline import DatasetRunner, _DATASET_REGISTRY
+
+        mock_loader = MagicMock(return_value=[{"q": "x"}])
+
+        _DATASET_REGISTRY["_trace"] = DatasetRunner(
+            loader=mock_loader,
+            task=_TraceTask(),
+            default_prompt_fn=lambda cfg: "standard",
+        )
+        try:
+            with (
+                patch("src.pipeline.Embedder") as MockEmbedder,
+                patch("src.pipeline._build_llm", return_value=MagicMock()),
+            ):
+                embedder_instance = MagicMock()
+                embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
+                    (len(texts), 384)
+                ).astype("float32")
+                embedder_instance.embedding_dim = 384
+                MockEmbedder.return_value = embedder_instance
+
+                result = main([
+                    "--config", "configs/config.yaml",
+                    "--dataset", "_trace",
+                    "--n", "1",
+                    "--poison_rate", "0.0",
+                    "--seed", "42",
+                    "--self_consistency_runs", "1",
+                ])
+
+            mock_loader.assert_called_once()
+            assert result == {"tracer_metric": 0.5}
+        finally:
+            del _DATASET_REGISTRY["_trace"]
+
+    def test_poisoner_field_called_when_poison_rate_positive(self):
+        """DatasetRunner.poisoner is invoked and receives poison_rate when rate > 0."""
+        import numpy as np
+        from src.pipeline import DatasetRunner, _DATASET_REGISTRY
+
+        stub_examples = [{"q": "x"}]
+        mock_loader = MagicMock(return_value=stub_examples)
+        mock_poisoner = MagicMock(return_value=stub_examples)
+
+        _DATASET_REGISTRY["_poison_test"] = DatasetRunner(
+            loader=mock_loader,
+            task=_TraceTask(),
+            default_prompt_fn=lambda cfg: "standard",
+            poisoner=mock_poisoner,
+        )
+        try:
+            with (
+                patch("src.pipeline.Embedder") as MockEmbedder,
+                patch("src.pipeline._build_llm", return_value=MagicMock()),
+            ):
+                embedder_instance = MagicMock()
+                embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
+                    (len(texts), 384)
+                ).astype("float32")
+                embedder_instance.embedding_dim = 384
+                MockEmbedder.return_value = embedder_instance
+
+                main([
+                    "--config", "configs/config.yaml",
+                    "--dataset", "_poison_test",
+                    "--n", "1",
+                    "--poison_rate", "0.5",
+                    "--seed", "42",
+                    "--self_consistency_runs", "1",
+                ])
+
+            mock_poisoner.assert_called_once()
+            _, kwargs = mock_poisoner.call_args
+            assert kwargs.get("poison_rate") == 0.5
+        finally:
+            del _DATASET_REGISTRY["_poison_test"]
+
+
 def test_custom_dataset_registered_and_dispatched():
     """A DatasetRunner added to _DATASET_REGISTRY is dispatched through main()."""
     import numpy as np
     from src.pipeline import DatasetRunner, _DATASET_REGISTRY
 
     metrics_stub = {"custom_metric": 0.75}
-    mock_runner_fn = MagicMock(return_value=metrics_stub)
+    mock_loader = MagicMock(return_value=[{"q": "x"}])
 
     custom_runner = DatasetRunner(
-        runner=mock_runner_fn,
+        loader=mock_loader,
+        task=_TraceTask(),
         default_prompt_fn=lambda cfg: "standard",
     )
     _DATASET_REGISTRY["custom"] = custom_runner
@@ -291,8 +395,8 @@ def test_custom_dataset_registered_and_dispatched():
                 "--self_consistency_runs", "1",
             ])
 
-        mock_runner_fn.assert_called_once()
-        assert result == metrics_stub
+        mock_loader.assert_called_once()
+        assert result == {"tracer_metric": 0.5}
     finally:
         del _DATASET_REGISTRY["custom"]
 
