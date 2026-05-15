@@ -2,16 +2,16 @@
 
 Two dataset paths are supported and selected via ``--dataset``:
 
-- ``fever``     → load_fever / poison_dataset / scorer (claim verification)
-- ``hotpotqa``  → load_hotpotqa / poison_hotpotqa / qa_scorer (multi-hop QA)
+- ``fever``     → load_fever / poison_dataset / FeverTask (claim verification)
+- ``hotpotqa``  → load_hotpotqa / poison_hotpotqa / HotpotQATask (multi-hop QA)
 
 Each path uses its native schema and metrics; no normalisation is forced.
 """
 import argparse
 import json
 import os
-from dataclasses import dataclass
-from typing import Callable
+from dataclasses import dataclass, field
+from typing import Callable, Optional
 
 import yaml
 
@@ -19,8 +19,9 @@ from src.data.fever_loader import load_fever
 from src.data.hotpotqa_loader import load_hotpotqa
 from src.data.hotpotqa_poisoner import poison_hotpotqa
 from src.data.poisoner import poison_dataset
-from src.evaluation import qa_scorer
-from src.evaluation.scorer import run as run_scorer
+from src.evaluation.pipeline import run_pipeline
+from src.evaluation.qa_scorer import HotpotQATask
+from src.evaluation.scorer import FeverTask
 from src.generation.llm_client import HuggingFaceClient
 from src.retrieval.embedder import Embedder
 from src.retrieval.retriever import Retriever
@@ -30,11 +31,16 @@ from src.retrieval.retriever import Retriever
 class DatasetRunner:
     """Single registration point for one dataset.
 
-    runner: (cfg, n, poison_rate, seed, strategy, retriever, llm, prompt_type, sc_runs) -> metrics
+    loader:          (cfg, n) -> list[dict]
+    task:            EvaluationTask adapter
     default_prompt_fn: resolves the default prompt-type string from the config dict.
+    poisoner:        normalized (examples, poison_rate, seed, strategy, llm) -> list[dict],
+                     or None to skip poisoning.
     """
-    runner: Callable[..., dict[str, float]]
+    loader: Callable[..., list[dict]]
+    task: object
     default_prompt_fn: Callable[[dict], str]
+    poisoner: Optional[Callable] = field(default=None)
 
 
 def load_config(path: str) -> dict:
@@ -48,55 +54,26 @@ def _build_llm(model: str, cfg: dict):
     return HuggingFaceClient(model=model, temperature=temperature, cache_dir=cache_dir)
 
 
-def _run_fever(examples, retriever, llm, prompt_type, cfg, seed, sc_runs):
-    return run_scorer(
-        examples=examples,
-        retriever=retriever,
-        llm=llm,
-        prompt_type=prompt_type,
-        distractor_pool_size=cfg["retrieval"]["distractor_pool_size"],
-        max_tokens_by_prompt=cfg["prompts"]["max_tokens"],
-        seed=seed,
-        self_consistency_runs=sc_runs,
-    )
+def _poison_fever(examples, poison_rate, seed, strategy, llm):
+    return poison_dataset(examples, poison_rate=poison_rate, seed=seed, strategy=strategy, llm=llm)
 
 
-def _run_hotpotqa(examples, retriever, llm, prompt_type, cfg, seed, sc_runs):
-    return qa_scorer.run(
-        examples=examples,
-        retriever=retriever,
-        llm=llm,
-        prompt_type=prompt_type,
-        max_tokens_by_prompt=cfg["prompts"]["max_tokens"],
-        seed=seed,
-        self_consistency_runs=sc_runs,
-    )
-
-
-def _fever_runner(cfg, n, poison_rate, seed, strategy, retriever, llm, prompt_type, sc_runs):
-    examples = load_fever(cfg["dataset"]["fever_dev"], max_examples=n)
-    if poison_rate > 0.0:
-        examples = poison_dataset(
-            examples, poison_rate=poison_rate, seed=seed, strategy=strategy, llm=llm,
-        )
-    return _run_fever(examples, retriever, llm, prompt_type, cfg, seed, sc_runs)
-
-
-def _hotpotqa_runner(cfg, n, poison_rate, seed, strategy, retriever, llm, prompt_type, sc_runs):
-    examples = load_hotpotqa(cfg["dataset"]["hotpotqa_dev"], max_examples=n)
-    if poison_rate > 0.0:
-        examples = poison_hotpotqa(examples, poison_rate=poison_rate, seed=seed)
-    return _run_hotpotqa(examples, retriever, llm, prompt_type, cfg, seed, sc_runs)
+def _poison_hotpotqa(examples, poison_rate, seed, strategy, llm):
+    return poison_hotpotqa(examples, poison_rate=poison_rate, seed=seed)
 
 
 _DATASET_REGISTRY: dict[str, DatasetRunner] = {
     "fever": DatasetRunner(
-        runner=_fever_runner,
+        loader=lambda cfg, n: load_fever(cfg["dataset"]["fever_dev"], max_examples=n),
+        task=FeverTask(),
         default_prompt_fn=lambda cfg: cfg["prompts"]["default"],
+        poisoner=_poison_fever,
     ),
     "hotpotqa": DatasetRunner(
-        runner=_hotpotqa_runner,
+        loader=lambda cfg, n: load_hotpotqa(cfg["dataset"]["hotpotqa_dev"], max_examples=n),
+        task=HotpotQATask(),
         default_prompt_fn=lambda cfg: cfg["prompts"].get("default_qa", "standard_qa"),
+        poisoner=_poison_hotpotqa,
     ),
 }
 
@@ -146,7 +123,20 @@ def main(argv=None) -> dict:
     with embedder, llm:
         ds = _DATASET_REGISTRY[dataset]
         prompt_type = args.prompt_type if args.prompt_type is not None else ds.default_prompt_fn(cfg)
-        metrics = ds.runner(cfg, n, poison_rate, seed, strategy, retriever, llm, prompt_type, sc_runs)
+        examples = ds.loader(cfg, n)
+        if poison_rate > 0.0 and ds.poisoner is not None:
+            examples = ds.poisoner(examples, poison_rate=poison_rate, seed=seed, strategy=strategy, llm=llm)
+        metrics = run_pipeline(
+            ds.task,
+            examples,
+            retriever,
+            llm,
+            prompt_type=prompt_type,
+            sc_runs=sc_runs,
+            seed=seed,
+            distractor_pool_size=cfg["retrieval"]["distractor_pool_size"],
+            max_tokens_by_prompt=cfg["prompts"]["max_tokens"],
+        )
 
     run_cfg = {
         "dataset": dataset,
