@@ -34,7 +34,7 @@ from src.evaluation.metrics import (
 from src.generation.llm_client import LLMClient
 from src.generation.parser import extract_contradiction_flag, extract_label
 from src.generation.prompts import PromptType, format_prompt
-from src.retrieval.corpus import build_corpus
+from src.retrieval.corpus import build_all_corpora
 from src.retrieval.retriever import Retriever
 
 logger = logging.getLogger(__name__)
@@ -78,15 +78,9 @@ def prepare_cases(
     tok_map = max_tokens_by_prompt if max_tokens_by_prompt is not None else _DEFAULT_MAX_TOKENS
     max_tokens = tok_map.get(prompt_type, 256)
 
+    corpora = build_all_corpora(examples, distractor_pool_size=distractor_pool_size, seed=seed)
     cases: list[EvaluationCase] = []
-    for i, example in enumerate(examples):
-        corpus = build_corpus(
-            example=example,
-            all_examples=examples,
-            distractor_pool_size=distractor_pool_size,
-            seed=seed + i,
-            example_index=i,
-        )
+    for i, (example, corpus) in enumerate(zip(examples, corpora)):
         retriever.build(corpus)
         passages = retriever.retrieve(example["claim"])
         gold_passages = [corpus.passages[j] for j in corpus.gold_indices]

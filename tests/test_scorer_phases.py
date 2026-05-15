@@ -131,6 +131,17 @@ class TestPrepareCases:
         for case in cases:
             assert isinstance(case, EvaluationCase)
 
+    def test_gold_passages_consistent_with_build_all_corpora(self):
+        """gold_passages must equal what build_all_corpora() derives for the same inputs."""
+        from src.retrieval.corpus import build_all_corpora
+        corpora = build_all_corpora(EXAMPLES, distractor_pool_size=5, seed=42)
+        cases = scorer.prepare_cases(
+            EXAMPLES, _retriever(), distractor_pool_size=5, seed=42, max_tokens_by_prompt=_MAX_TOKENS
+        )
+        for case, corpus in zip(cases, corpora):
+            expected_gold = [corpus.passages[j] for j in sorted(corpus.gold_indices)]
+            assert case.gold_passages == expected_gold
+
 
 # ---------------------------------------------------------------------------
 # resolve
