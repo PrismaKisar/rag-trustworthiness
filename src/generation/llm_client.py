@@ -61,9 +61,11 @@ class LLMClient(ABC):
         temperature: float = 0.0,
         cache_dir: str | os.PathLike = ".cache/llm_responses",
         requests_per_minute: int | None = None,
+        max_tokens: int = 256,
     ) -> None:
         self._model = model
         self._temperature = temperature
+        self._max_tokens = max_tokens
         self._cache = diskcache.Cache(str(cache_dir))
         self._min_interval = (60.0 / requests_per_minute) if requests_per_minute else 0.0
         self._last_call_time: float = 0.0
@@ -165,8 +167,7 @@ class HuggingFaceClient(LLMClient):
         cache_dir: str | os.PathLike = ".cache/llm_responses",
         max_tokens: int = 256,
     ) -> None:
-        super().__init__(model=model, temperature=temperature, cache_dir=cache_dir)
-        self._max_tokens = max_tokens
+        super().__init__(model=model, temperature=temperature, cache_dir=cache_dir, max_tokens=max_tokens)
         self._device = _get_device()
         self._hf_model = None
         self._tokenizer = None

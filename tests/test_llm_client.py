@@ -256,3 +256,56 @@ class TestCacheKey:
 
     def test_sensitive_to_max_tokens(self):
         assert _cache_key("p", "m", 0.0, 64) != _cache_key("p", "m", 0.0, 256)
+
+
+# ---------------------------------------------------------------------------
+# LLMClient abstract base — _max_tokens must be declared in the base
+# ---------------------------------------------------------------------------
+
+
+class TestLLMClientBase:
+    """Any minimal subclass must work without re-declaring _max_tokens."""
+
+    def _minimal_client(self, tmp_path, max_tokens=256):
+        from src.generation.llm_client import LLMClient
+
+        class MinimalClient(LLMClient):
+            def _call_api(self, prompt: str, max_tokens=None) -> str:
+                return "ok"
+
+        return MinimalClient(model="test-model", cache_dir=tmp_path / "llm", max_tokens=max_tokens)
+
+    def test_complete_without_explicit_max_tokens_does_not_raise(self, tmp_path):
+        """complete() must not raise AttributeError when max_tokens is omitted."""
+        client = self._minimal_client(tmp_path)
+        assert client.complete("hello") == "ok"
+
+    def test_base_default_max_tokens_respected(self, tmp_path):
+        """The max_tokens passed to __init__ must propagate to _call_api."""
+        from src.generation.llm_client import LLMClient
+
+        received: list[int] = []
+
+        class CapturingClient(LLMClient):
+            def _call_api(self, prompt: str, max_tokens=None) -> str:
+                received.append(max_tokens)
+                return "ok"
+
+        client = CapturingClient(model="m", cache_dir=tmp_path / "llm", max_tokens=128)
+        client.complete("hello")
+        assert received == [128]
+
+    def test_explicit_max_tokens_overrides_default(self, tmp_path):
+        """max_tokens passed to complete() must win over the instance default."""
+        from src.generation.llm_client import LLMClient
+
+        received: list[int] = []
+
+        class CapturingClient(LLMClient):
+            def _call_api(self, prompt: str, max_tokens=None) -> str:
+                received.append(max_tokens)
+                return "ok"
+
+        client = CapturingClient(model="m", cache_dir=tmp_path / "llm", max_tokens=64)
+        client.complete("hello", max_tokens=512)
+        assert received == [512]
