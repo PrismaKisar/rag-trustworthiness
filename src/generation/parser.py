@@ -72,3 +72,26 @@ def extract_label(text: str) -> str:
             return label
 
     return "NOT ENOUGH INFO"
+
+
+_CONSISTENCY_SECTION_RE = re.compile(
+    r"consistency\s+check\s*[:\-]\s*(.+?)(?:\n|$)",
+    re.IGNORECASE,
+)
+_CONTRADICTION_RE = re.compile(
+    r"\b(contradict|conflict|inconsistent|disagree)\b",
+    re.IGNORECASE,
+)
+
+
+def extract_contradiction_flag(text: str) -> bool:
+    """Return True if the vigilant-prompt consistency check flags a contradiction.
+
+    Parses the "Consistency check:" section and looks for explicit contradiction
+    language (contradict, conflict, inconsistent, disagree).
+    Returns False when the section is absent or describes consistent passages.
+    """
+    m = _CONSISTENCY_SECTION_RE.search(text)
+    if not m:
+        return False
+    return bool(_CONTRADICTION_RE.search(m.group(1)))

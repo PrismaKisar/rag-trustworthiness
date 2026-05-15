@@ -105,3 +105,38 @@ class TestExtractAnswer:
     def test_dash_separator(self):
         from src.generation.parser import extract_answer
         assert extract_answer("Final Answer - Berlin") == "Berlin"
+
+
+# ---------------------------------------------------------------------------
+# extract_contradiction_flag — vigilant prompt consistency check
+# ---------------------------------------------------------------------------
+
+class TestExtractContradictionFlag:
+    def test_explicit_contradict_returns_true(self):
+        from src.generation.parser import extract_contradiction_flag
+        text = (
+            "Consistency check: The passages contradict each other.\n"
+            "Final Label (SUPPORTS / REFUTES / NOT ENOUGH INFO): REFUTES"
+        )
+        assert extract_contradiction_flag(text) is True
+
+    def test_consistent_passages_returns_false(self):
+        from src.generation.parser import extract_contradiction_flag
+        text = (
+            "Consistency check: The passages are consistent with each other.\n"
+            "Final Label (SUPPORTS / REFUTES / NOT ENOUGH INFO): SUPPORTS"
+        )
+        assert extract_contradiction_flag(text) is False
+
+    def test_no_consistency_section_returns_false(self):
+        from src.generation.parser import extract_contradiction_flag
+        assert extract_contradiction_flag("Final Label: SUPPORTS") is False
+
+    def test_case_insensitive_match(self):
+        from src.generation.parser import extract_contradiction_flag
+        text = "Consistency Check: passages CONFLICT with each other.\nFinal Label: REFUTES"
+        assert extract_contradiction_flag(text) is True
+
+    def test_empty_string_returns_false(self):
+        from src.generation.parser import extract_contradiction_flag
+        assert extract_contradiction_flag("") is False
