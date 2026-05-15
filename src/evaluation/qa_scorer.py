@@ -24,7 +24,7 @@ from src.evaluation.metrics import exact_match, precision_at_k, self_consistency
 from src.generation.llm_client import LLMClient
 from src.generation.parser import extract_answer
 from src.generation.prompts import QAPromptType, format_qa_prompt
-from src.retrieval.corpus import RetrievalCorpus
+from src.retrieval.corpus import build_hotpotqa_corpus
 from src.retrieval.retriever import Retriever
 
 logger = logging.getLogger(__name__)
@@ -34,26 +34,6 @@ _DEFAULT_MAX_TOKENS: dict[str, int] = {
     "cot_qa": 256,
     "vigilant_qa": 128,
 }
-
-
-def _build_corpus(example: dict) -> RetrievalCorpus:
-    """Build a RetrievalCorpus from a HotpotQA example's context.
-
-    Each paragraph becomes one passage (sentences joined by space). Gold
-    indices are those whose title appears in the example's supporting_facts.
-    Poisoned positions in *example* mask any title-matching paragraph that was
-    altered, mirroring the FEVER convention.
-    """
-    supporting_titles = {title for title, _ in example["supporting_facts"]}
-    poisoned_titles = {title for title, _ in example.get("poisoned_positions", [])}
-
-    passages: list[str] = []
-    gold_indices: set[int] = set()
-    for i, (title, sents) in enumerate(example["context"]):
-        passages.append(" ".join(sents))
-        if title in supporting_titles and title not in poisoned_titles:
-            gold_indices.add(i)
-    return RetrievalCorpus(passages=passages, gold_indices=gold_indices)
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +55,7 @@ def prepare_cases(
 
     cases: list[QACase] = []
     for i, example in enumerate(examples):
-        corpus = _build_corpus(example)
+        corpus = build_hotpotqa_corpus(example)
         retriever.build(corpus)
         passages = retriever.retrieve(example["question"])
         gold_passages = [corpus.passages[j] for j in corpus.gold_indices]
