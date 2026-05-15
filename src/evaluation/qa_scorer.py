@@ -161,13 +161,59 @@ def run(
     max_tokens_by_prompt: dict[str, int] | None = None,
 ) -> dict[str, float]:
     """Run *llm* on every HotpotQA example and return aggregated metrics."""
-    cases = prepare_cases(
+    from src.evaluation.pipeline import run_pipeline
+    return run_pipeline(
+        task=HotpotQATask(),
         examples=examples,
         retriever=retriever,
+        llm=llm,
         prompt_type=prompt_type,
         sc_runs=self_consistency_runs,
-        max_tokens_by_prompt=max_tokens_by_prompt,
         seed=seed,
+        n_workers=n_workers,
+        max_tokens_by_prompt=max_tokens_by_prompt,
     )
-    results = resolve(cases, llm, n_workers=n_workers)
-    return aggregate(cases, results)
+
+
+# ---------------------------------------------------------------------------
+# EvaluationTask adapter
+# ---------------------------------------------------------------------------
+
+
+class HotpotQATask:
+    """Adapts the HotpotQA three-phase scorer to the EvaluationTask protocol."""
+
+    def build_cases(
+        self,
+        examples: list[dict],
+        retriever,
+        prompt_type: str,
+        sc_runs: int,
+        seed: int,
+        **kwargs,
+    ) -> list[QACase]:
+        return prepare_cases(
+            examples=examples,
+            retriever=retriever,
+            prompt_type=prompt_type,
+            sc_runs=sc_runs,
+            seed=seed,
+            max_tokens_by_prompt=kwargs.get("max_tokens_by_prompt"),
+        )
+
+    def parse_result(self, case_index: int, raw_runs: list[str]) -> QAResult:
+        runs = [extract_answer(r) for r in raw_runs]
+        predicted = Counter(runs).most_common(1)[0][0]
+        return QAResult(
+            case_index=case_index,
+            runs=runs,
+            predicted_answer=predicted,
+        )
+
+    def compute_metrics(
+        self,
+        cases: list[QACase],
+        results: list[QAResult],
+        prompt_type: str,
+    ) -> dict[str, float]:
+        return aggregate(cases, results)

@@ -211,19 +211,64 @@ def run(
     n_workers: int = 4,
     max_tokens_by_prompt: dict[str, int] | None = None,
 ) -> dict[str, float]:
-    """Run *llm* on every example and return aggregated metrics.
-
-    Thin composer over :func:`prepare_cases`, :func:`resolve`, :func:`aggregate`.
-    See those functions for parameter documentation.
-    """
-    cases = prepare_cases(
+    """Run *llm* on every example and return aggregated metrics."""
+    from src.evaluation.pipeline import run_pipeline
+    return run_pipeline(
+        task=FeverTask(),
         examples=examples,
         retriever=retriever,
+        llm=llm,
         prompt_type=prompt_type,
         sc_runs=self_consistency_runs,
+        seed=seed,
+        n_workers=n_workers,
         distractor_pool_size=distractor_pool_size,
         max_tokens_by_prompt=max_tokens_by_prompt,
-        seed=seed,
     )
-    results = resolve(cases, llm, n_workers=n_workers)
-    return aggregate(cases, results, prompt_type=prompt_type)
+
+
+# ---------------------------------------------------------------------------
+# EvaluationTask adapter
+# ---------------------------------------------------------------------------
+
+
+class FeverTask:
+    """Adapts the FEVER three-phase scorer to the EvaluationTask protocol."""
+
+    def build_cases(
+        self,
+        examples: list[dict],
+        retriever,
+        prompt_type: str,
+        sc_runs: int,
+        seed: int,
+        **kwargs,
+    ) -> list[EvaluationCase]:
+        return prepare_cases(
+            examples=examples,
+            retriever=retriever,
+            prompt_type=prompt_type,
+            sc_runs=sc_runs,
+            seed=seed,
+            distractor_pool_size=kwargs.get("distractor_pool_size", 20),
+            max_tokens_by_prompt=kwargs.get("max_tokens_by_prompt"),
+        )
+
+    def parse_result(self, case_index: int, raw_runs: list[str]) -> EvaluationResult:
+        runs = [extract_label(r) for r in raw_runs]
+        predicted = Counter(runs).most_common(1)[0][0]
+        contradiction_flag = extract_contradiction_flag(raw_runs[0])
+        return EvaluationResult(
+            case_index=case_index,
+            runs=runs,
+            predicted_label=predicted,
+            contradiction_flag=contradiction_flag,
+        )
+
+    def compute_metrics(
+        self,
+        cases: list[EvaluationCase],
+        results: list[EvaluationResult],
+        prompt_type: str,
+    ) -> dict[str, float]:
+        return aggregate(cases, results, prompt_type=prompt_type)
