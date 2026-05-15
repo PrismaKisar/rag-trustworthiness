@@ -184,6 +184,36 @@ class TestResolve:
         for result in results:
             assert result.runs[0] in ("SUPPORTS", "REFUTES", "NOT ENOUGH INFO")
 
+    def test_contradiction_flag_true_when_response_contains_contradiction(self):
+        cases = scorer.prepare_cases(
+            [{"claim": "C", "evidence": ["p1", "p2"], "label": "REFUTES"}],
+            _retriever(),
+            prompt_type="vigilant",
+            sc_runs=1,
+            max_tokens_by_prompt=_MAX_TOKENS,
+        )
+        vigilant_response = (
+            "Consistency check: The passages contradict each other.\n"
+            "Final Label (SUPPORTS / REFUTES / NOT ENOUGH INFO): REFUTES"
+        )
+        results = scorer.resolve(cases, _llm(vigilant_response))
+        assert results[0].contradiction_flag is True
+
+    def test_contradiction_flag_false_when_passages_consistent(self):
+        cases = scorer.prepare_cases(
+            [{"claim": "C", "evidence": ["p1"], "label": "SUPPORTS"}],
+            _retriever(),
+            prompt_type="vigilant",
+            sc_runs=1,
+            max_tokens_by_prompt=_MAX_TOKENS,
+        )
+        consistent_response = (
+            "Consistency check: The passages are consistent.\n"
+            "Final Label (SUPPORTS / REFUTES / NOT ENOUGH INFO): SUPPORTS"
+        )
+        results = scorer.resolve(cases, _llm(consistent_response))
+        assert results[0].contradiction_flag is False
+
 
 # ---------------------------------------------------------------------------
 # aggregate
@@ -281,3 +311,37 @@ class TestAggregate:
         out = scorer.aggregate(cases, results)
         for v in out.values():
             assert 0.0 <= v <= 1.0
+
+    def test_contradiction_detection_rate_present_for_vigilant(self):
+        cases, _ = self._make_cases_and_results(["SUPPORTS", "REFUTES"], ["SUPPORTS", "REFUTES"])
+        results = [
+            EvaluationResult(case_index=0, runs=["SUPPORTS"], predicted_label="SUPPORTS", contradiction_flag=True),
+            EvaluationResult(case_index=1, runs=["REFUTES"], predicted_label="REFUTES", contradiction_flag=False),
+        ]
+        out = scorer.aggregate(cases, results, prompt_type="vigilant")
+        assert "contradiction_detection_rate" in out
+        assert out["contradiction_detection_rate"] == pytest.approx(0.5)
+
+    def test_contradiction_detection_rate_absent_for_standard(self):
+        cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"])
+        out = scorer.aggregate(cases, results, prompt_type="standard")
+        assert "contradiction_detection_rate" not in out
+
+    def test_contradiction_detection_rate_absent_by_default(self):
+        cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"])
+        out = scorer.aggregate(cases, results)
+        assert "contradiction_detection_rate" not in out
+
+
+# ---------------------------------------------------------------------------
+# EvaluationResult.contradiction_flag
+# ---------------------------------------------------------------------------
+
+class TestEvaluationResultContradictionFlag:
+    def test_default_is_false(self):
+        r = EvaluationResult(case_index=0, runs=["SUPPORTS"], predicted_label="SUPPORTS")
+        assert r.contradiction_flag is False
+
+    def test_can_set_true(self):
+        r = EvaluationResult(case_index=0, runs=["REFUTES"], predicted_label="REFUTES", contradiction_flag=True)
+        assert r.contradiction_flag is True

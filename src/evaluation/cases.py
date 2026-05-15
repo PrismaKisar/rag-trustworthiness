@@ -24,6 +24,7 @@ class EvaluationResult:
     case_index: int
     runs: list[str]
     predicted_label: str
+    contradiction_flag: bool = False
 
 
 @dataclass(frozen=True)

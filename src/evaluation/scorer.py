@@ -25,13 +25,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.evaluation.cases import EvaluationCase, EvaluationResult
 from src.evaluation.metrics import (
     accuracy,
+    contradiction_detection_rate,
     hallucination_rate,
     macro_f1,
     precision_at_k,
     self_consistency,
 )
 from src.generation.llm_client import LLMClient
-from src.generation.parser import extract_label
+from src.generation.parser import extract_contradiction_flag, extract_label
 from src.generation.prompts import PromptType, format_prompt
 from src.retrieval.corpus import build_corpus
 from src.retrieval.retriever import Retriever
@@ -138,7 +139,7 @@ def resolve(
         for run_idx, prompt in enumerate(case.prompts)
     ]
 
-    responses: dict[tuple[int, int], str] = {}
+    raw_responses: dict[tuple[int, int], str] = {}
     with ThreadPoolExecutor(max_workers=min(n_workers, len(tasks))) as pool:
         future_to_key = {
             pool.submit(llm.complete, prompt, max_tokens): (case_idx, run_idx)
@@ -146,12 +147,14 @@ def resolve(
         }
         for future in as_completed(future_to_key):
             key = future_to_key[future]
-            responses[key] = extract_label(future.result())
+            raw_responses[key] = future.result()
 
     results: list[EvaluationResult] = []
     for case_idx, case in enumerate(cases):
-        runs = [responses[(case_idx, j)] for j in range(len(case.prompts))]
+        raw_runs = [raw_responses[(case_idx, j)] for j in range(len(case.prompts))]
+        runs = [extract_label(r) for r in raw_runs]
         predicted = Counter(runs).most_common(1)[0][0]
+        contradiction_flag = extract_contradiction_flag(raw_runs[0])
         logger.debug(
             "Case %d/%d  gold=%s  pred=%s",
             case_idx + 1, len(cases), case.gold_label, predicted,
@@ -160,6 +163,7 @@ def resolve(
             case_index=case_idx,
             runs=runs,
             predicted_label=predicted,
+            contradiction_flag=contradiction_flag,
         ))
 
     return results
@@ -172,6 +176,7 @@ def resolve(
 def aggregate(
     cases: list[EvaluationCase],
     results: list[EvaluationResult],
+    prompt_type: PromptType = "standard",
 ) -> dict[str, float]:
     """Compute evaluation metrics from *cases* and *results*.
 
@@ -180,10 +185,13 @@ def aggregate(
     Args:
         cases: Output of :func:`prepare_cases`.
         results: Output of :func:`resolve`, same order as *cases*.
+        prompt_type: Used to decide which optional metrics to include.
+            ``"vigilant"`` adds ``contradiction_detection_rate``.
 
     Returns:
         Dict with ``accuracy``, ``macro_f1``, ``hallucination_rate``,
-        ``precision_at_k``, and ``self_consistency`` (only when sc_runs > 1).
+        ``precision_at_k``, ``self_consistency`` (only when sc_runs > 1),
+        and ``contradiction_detection_rate`` (only when prompt_type == "vigilant").
     """
     gold_labels = [case.gold_label for case in cases]
     predictions = [result.predicted_label for result in results]
@@ -201,6 +209,11 @@ def aggregate(
 
     if cases and len(cases[0].prompts) > 1:
         metrics["self_consistency"] = self_consistency([r.runs for r in results])
+
+    if prompt_type == "vigilant":
+        metrics["contradiction_detection_rate"] = contradiction_detection_rate(
+            [r.contradiction_flag for r in results]
+        )
 
     return metrics
 
@@ -235,4 +248,4 @@ def run(
         seed=seed,
     )
     results = resolve(cases, llm, n_workers=n_workers)
-    return aggregate(cases, results)
+    return aggregate(cases, results, prompt_type=prompt_type)

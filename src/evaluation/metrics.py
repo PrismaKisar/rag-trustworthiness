@@ -134,3 +134,17 @@ def precision_at_k(retrieved: list[str], gold: list[str]) -> float:
         return 0.0
     gold_set = set(gold)
     return sum(1 for p in retrieved if p in gold_set) / len(retrieved)
+
+
+def contradiction_detection_rate(flags: list[bool]) -> float:
+    """Fraction of results where the model explicitly flagged a contradiction.
+
+    Args:
+        flags: Per-result boolean from :func:`~src.generation.parser.extract_contradiction_flag`.
+
+    Returns:
+        Float in [0, 1]; 0.0 for empty input.
+    """
+    if not flags:
+        return 0.0
+    return sum(flags) / len(flags)
