@@ -236,6 +236,33 @@ class TestAggregate:
         out = qa_scorer.aggregate(cases, results)
         assert "self_consistency" not in out
 
+    def test_includes_hallucination_rate(self):
+        from src.evaluation import qa_scorer
+        cases, results = self._make_pair(["Warsaw"], ["Warsaw"])
+        out = qa_scorer.aggregate(cases, results)
+        assert "hallucination_rate" in out
+        assert 0.0 <= out["hallucination_rate"] <= 1.0
+
+    def test_hallucination_rate_zero_when_grounded(self):
+        from src.evaluation import qa_scorer
+        cases, results = self._make_pair(
+            ["Warsaw"],
+            ["Warsaw"],
+            retrieved=[["Warsaw is the capital of Poland."]],
+        )
+        out = qa_scorer.aggregate(cases, results)
+        assert out["hallucination_rate"] == pytest.approx(0.0)
+
+    def test_hallucination_rate_one_when_ungrounded(self):
+        from src.evaluation import qa_scorer
+        cases, results = self._make_pair(
+            ["xyzzyquux"],
+            ["Warsaw"],
+            retrieved=[["Marie Curie was born in Poland."]],
+        )
+        out = qa_scorer.aggregate(cases, results)
+        assert out["hallucination_rate"] == pytest.approx(1.0)
+
 
 # ---------------------------------------------------------------------------
 # run — composer

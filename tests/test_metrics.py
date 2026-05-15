@@ -8,6 +8,7 @@ from src.evaluation.metrics import (
     hallucination_rate,
     macro_f1,
     precision_at_k,
+    qa_hallucination_rate,
     retrieval_accuracy_correlation,
     self_consistency,
 )
@@ -212,6 +213,33 @@ class TestTokenF1:
     def test_empty_gold_returns_zero(self):
         from src.evaluation.metrics import token_f1
         assert token_f1("Marie Curie", "") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# qa_hallucination_rate
+# ---------------------------------------------------------------------------
+
+class TestQaHallucinationRate:
+    def test_all_grounded_returns_zero(self):
+        predicted = ["Warsaw"]
+        passages = [["Warsaw is the capital of Poland."]]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(0.0)
+
+    def test_none_grounded_returns_one(self):
+        predicted = ["xyzzyquux"]
+        passages = [["Marie Curie was born in Poland."]]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(1.0)
+
+    def test_mixed_returns_correct_fraction(self):
+        predicted = ["Warsaw", "xyzzyquux"]
+        passages = [
+            ["Warsaw is the capital of Poland."],
+            ["Marie Curie was born in Poland."],
+        ]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(0.5)
+
+    def test_empty_returns_zero(self):
+        assert qa_hallucination_rate([], []) == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
