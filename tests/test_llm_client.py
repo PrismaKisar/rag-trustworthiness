@@ -174,7 +174,8 @@ class TestPadTokenId:
             mock_model_cls.from_pretrained.return_value = mock_hf_model
             mock_hf_model.to.return_value = mock_hf_model
 
-            HuggingFaceClient(cache_dir=tmp_path / "llm")
+            client = HuggingFaceClient(cache_dir=tmp_path / "llm")
+            client._load_model()  # lazy — must be triggered explicitly to exercise fallback
 
         assert mock_tokenizer.pad_token_id == 42
 
@@ -193,7 +194,8 @@ class TestPadTokenId:
             mock_model_cls.from_pretrained.return_value = mock_hf_model
             mock_hf_model.to.return_value = mock_hf_model
 
-            HuggingFaceClient(cache_dir=tmp_path / "llm")
+            client = HuggingFaceClient(cache_dir=tmp_path / "llm")
+            client._load_model()  # lazy — must be triggered explicitly
 
         assert mock_tokenizer.pad_token_id == 7  # unchanged
 
