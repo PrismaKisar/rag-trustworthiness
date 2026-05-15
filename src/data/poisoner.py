@@ -73,7 +73,11 @@ def poison_dataset(
     Args:
         examples: Output of ``fever_loader.load_fever`` — each dict has keys
                   ``claim`` (str), ``evidence`` (list[str]), ``label`` (str).
-        poison_rate: Fraction of evidence passages to replace; must be in [0, 1].
+        poison_rate: Expected fraction of evidence passages to replace; must be in
+                     [0, 1]. Each passage is selected independently via a Bernoulli
+                     trial (``rng.random() < poison_rate``), so the actual count is
+                     stochastic for intermediate rates (0 < rate < 1) and exact only
+                     at the boundaries (0 → none replaced, 1 → all replaced).
         seed: Random seed for reproducibility.
         strategy: ``"opposite_label"`` (Strategy A — sample distractors from
                   opposite-label evidence) or ``"llm_negation"`` (Strategy B —
