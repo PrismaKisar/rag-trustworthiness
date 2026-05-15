@@ -23,7 +23,7 @@ from src.evaluation.dispatch import resolve_raw
 from src.evaluation.metrics import exact_match, precision_at_k, self_consistency, token_f1
 from src.generation.llm_client import LLMClient
 from src.generation.parser import extract_answer
-from src.generation.prompts import QAPromptType, format_qa_prompt
+from src.generation.prompts import QAPromptType, format_prompt
 from src.retrieval.corpus import build_hotpotqa_corpus
 from src.retrieval.retriever import Retriever
 
@@ -61,11 +61,11 @@ def prepare_cases(
         gold_passages = [corpus.passages[j] for j in corpus.gold_indices]
 
         rng = random.Random(seed + i)
-        prompts = [format_qa_prompt(example["question"], passages, prompt_type)]
+        prompts = [format_prompt(example["question"], passages, prompt_type)]
         for _ in range(sc_runs - 1):
             shuffled = list(passages)
             rng.shuffle(shuffled)
-            prompts.append(format_qa_prompt(example["question"], shuffled, prompt_type))
+            prompts.append(format_prompt(example["question"], shuffled, prompt_type))
 
         cases.append(QACase(
             question=example["question"],
@@ -161,13 +161,59 @@ def run(
     max_tokens_by_prompt: dict[str, int] | None = None,
 ) -> dict[str, float]:
     """Run *llm* on every HotpotQA example and return aggregated metrics."""
-    cases = prepare_cases(
+    from src.evaluation.pipeline import run_pipeline
+    return run_pipeline(
+        task=HotpotQATask(),
         examples=examples,
         retriever=retriever,
+        llm=llm,
         prompt_type=prompt_type,
         sc_runs=self_consistency_runs,
-        max_tokens_by_prompt=max_tokens_by_prompt,
         seed=seed,
+        n_workers=n_workers,
+        max_tokens_by_prompt=max_tokens_by_prompt,
     )
-    results = resolve(cases, llm, n_workers=n_workers)
-    return aggregate(cases, results)
+
+
+# ---------------------------------------------------------------------------
+# EvaluationTask adapter
+# ---------------------------------------------------------------------------
+
+
+class HotpotQATask:
+    """Adapts the HotpotQA three-phase scorer to the EvaluationTask protocol."""
+
+    def build_cases(
+        self,
+        examples: list[dict],
+        retriever,
+        prompt_type: str,
+        sc_runs: int,
+        seed: int,
+        **kwargs,
+    ) -> list[QACase]:
+        return prepare_cases(
+            examples=examples,
+            retriever=retriever,
+            prompt_type=prompt_type,
+            sc_runs=sc_runs,
+            seed=seed,
+            max_tokens_by_prompt=kwargs.get("max_tokens_by_prompt"),
+        )
+
+    def parse_result(self, case_index: int, raw_runs: list[str]) -> QAResult:
+        runs = [extract_answer(r) for r in raw_runs]
+        predicted = Counter(runs).most_common(1)[0][0]
+        return QAResult(
+            case_index=case_index,
+            runs=runs,
+            predicted_answer=predicted,
+        )
+
+    def compute_metrics(
+        self,
+        cases: list[QACase],
+        results: list[QAResult],
+        prompt_type: str,
+    ) -> dict[str, float]:
+        return aggregate(cases, results)
