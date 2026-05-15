@@ -127,6 +127,41 @@ def test_pipeline_poison_rate_override(mock_llm, tmp_path):
     assert kwargs["poison_rate"] == 0.5
 
 
+def test_pipeline_passes_strategy_to_poisoner(mock_llm):
+    """Pipeline must forward poisoning.strategy and llm to poison_dataset."""
+    with (
+        patch("src.pipeline.load_fever", return_value=FAKE_EXAMPLES),
+        patch("src.pipeline.Embedder") as MockEmbedder,
+        patch("src.pipeline._build_llm", return_value=mock_llm),
+        patch("src.pipeline.poison_dataset", wraps=lambda ex, **kw: ex) as mock_poison,
+    ):
+        import numpy as np
+
+        embedder_instance = MagicMock()
+        embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
+            (len(texts), 384)
+        ).astype("float32")
+        embedder_instance.embedding_dim = 384
+        MockEmbedder.return_value = embedder_instance
+
+        mock_llm.complete.side_effect = [f"Final Label: {lbl}" for lbl in _LABEL_CYCLE]
+
+        main([
+            "--config", "configs/config.yaml",
+            "--n", "5",
+            "--poison_rate", "0.5",
+            "--strategy", "llm_negation",
+            "--model", "claude-haiku-4-5-20251001",
+            "--prompt_type", "standard",
+            "--self_consistency_runs", "1",
+        ])
+
+    mock_poison.assert_called_once()
+    _, kwargs = mock_poison.call_args
+    assert kwargs["strategy"] == "llm_negation"
+    assert kwargs.get("llm") is mock_llm
+
+
 def test_pipeline_no_poison_skips_poisoner(mock_llm):
     """Poisoner is NOT called when poison_rate == 0.0."""
     with (
