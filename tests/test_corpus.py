@@ -116,3 +116,68 @@ def test_poisoned_positions_excluded_from_gold():
     corpus = build_corpus(poisoned_ex, EXAMPLES, distractor_pool_size=0, example_index=None)
     assert 1 not in corpus.gold_indices
     assert corpus.gold_indices == {0, 2}
+
+
+# ---------------------------------------------------------------------------
+# build_hotpotqa_corpus
+# ---------------------------------------------------------------------------
+
+_HOTPOT_EX = {
+    "question": "Where was Marie Curie born?",
+    "answer": "Warsaw",
+    "supporting_facts": [["Marie Curie", 0], ["Warsaw", 0]],
+    "context": [
+        ["Marie Curie", ["Marie Curie was born in Warsaw.", "She won Nobel prizes."]],
+        ["Warsaw", ["Warsaw is the capital of Poland.", "It is in central Poland."]],
+        ["Distractor A", ["A totally unrelated paragraph.", "More filler."]],
+    ],
+}
+
+
+def test_build_hotpotqa_corpus_returns_retrieval_corpus():
+    from src.retrieval.corpus import build_hotpotqa_corpus
+    corpus = build_hotpotqa_corpus(_HOTPOT_EX)
+    assert isinstance(corpus, RetrievalCorpus)
+
+
+def test_build_hotpotqa_corpus_passages_are_joined_sentences():
+    from src.retrieval.corpus import build_hotpotqa_corpus
+    corpus = build_hotpotqa_corpus(_HOTPOT_EX)
+    assert corpus.passages[0] == "Marie Curie was born in Warsaw. She won Nobel prizes."
+    assert corpus.passages[1] == "Warsaw is the capital of Poland. It is in central Poland."
+
+
+def test_build_hotpotqa_corpus_supporting_titles_are_gold():
+    from src.retrieval.corpus import build_hotpotqa_corpus
+    corpus = build_hotpotqa_corpus(_HOTPOT_EX)
+    # "Marie Curie" → index 0, "Warsaw" → index 1; "Distractor A" → not gold
+    assert corpus.gold_indices == {0, 1}
+
+
+def test_build_hotpotqa_corpus_non_supporting_not_gold():
+    from src.retrieval.corpus import build_hotpotqa_corpus
+    corpus = build_hotpotqa_corpus(_HOTPOT_EX)
+    assert 2 not in corpus.gold_indices  # "Distractor A" is not supporting
+
+
+def test_build_hotpotqa_corpus_poisoned_title_excluded_from_gold():
+    from src.retrieval.corpus import build_hotpotqa_corpus
+    ex = {**_HOTPOT_EX, "poisoned_positions": [["Marie Curie", 0]]}
+    corpus = build_hotpotqa_corpus(ex)
+    # "Marie Curie" is supporting but poisoned → excluded; "Warsaw" remains
+    assert 0 not in corpus.gold_indices
+    assert 1 in corpus.gold_indices
+
+
+def test_build_hotpotqa_corpus_no_poisoned_positions_key():
+    from src.retrieval.corpus import build_hotpotqa_corpus
+    ex = {k: v for k, v in _HOTPOT_EX.items() if k != "poisoned_positions"}
+    corpus = build_hotpotqa_corpus(ex)
+    assert corpus.gold_indices == {0, 1}
+
+
+def test_build_hotpotqa_corpus_empty_supporting_facts():
+    from src.retrieval.corpus import build_hotpotqa_corpus
+    ex = {**_HOTPOT_EX, "supporting_facts": []}
+    corpus = build_hotpotqa_corpus(ex)
+    assert corpus.gold_indices == set()

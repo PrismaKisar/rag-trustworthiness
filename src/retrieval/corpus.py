@@ -77,6 +77,25 @@ def build_corpus(
     return RetrievalCorpus(passages=passages, gold_indices=gold_indices)
 
 
+def build_hotpotqa_corpus(example: dict) -> RetrievalCorpus:
+    """Build a RetrievalCorpus from a HotpotQA example's context.
+
+    Each paragraph becomes one passage (sentences joined by space). Gold
+    indices are those whose title appears in supporting_facts but not in
+    poisoned_positions.
+    """
+    supporting_titles = {title for title, _ in example["supporting_facts"]}
+    poisoned_titles = {title for title, _ in example.get("poisoned_positions", [])}
+
+    passages: list[str] = []
+    gold_indices: set[int] = set()
+    for i, (title, sents) in enumerate(example["context"]):
+        passages.append(" ".join(sents))
+        if title in supporting_titles and title not in poisoned_titles:
+            gold_indices.add(i)
+    return RetrievalCorpus(passages=passages, gold_indices=gold_indices)
+
+
 def build_all_corpora(
     examples: list[dict],
     distractor_pool_size: int = 20,
