@@ -157,6 +157,85 @@ def test_no_poisoned_positions_at_rate_zero():
         assert "poisoned_positions" not in item
 
 
+# ---------------------------------------------------------------------------
+# Tests — strategy parameter
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_strategy_raises():
+    with pytest.raises(ValueError, match="strategy"):
+        poison_dataset(EXAMPLES, poison_rate=0.5, strategy="bogus")
+
+
+def test_explicit_opposite_label_strategy_matches_default():
+    default = poison_dataset(EXAMPLES, poison_rate=0.5, seed=42)
+    explicit = poison_dataset(EXAMPLES, poison_rate=0.5, seed=42, strategy="opposite_label")
+    assert default == explicit
+
+
+def test_llm_negation_requires_llm():
+    with pytest.raises(ValueError, match="llm"):
+        poison_dataset(EXAMPLES, poison_rate=0.5, strategy="llm_negation")
+
+
+class _FakeLLM:
+    """Deterministic mock that returns a sentinel-tagged negation."""
+
+    def __init__(self):
+        self.calls: list[str] = []
+
+    def complete(self, prompt, max_tokens=None):
+        self.calls.append(prompt)
+        return f"NEGATED::{len(self.calls)}"
+
+
+def test_llm_negation_replaces_passages_with_llm_output():
+    llm = _FakeLLM()
+    result = poison_dataset(
+        EXAMPLES, poison_rate=1.0, seed=42, strategy="llm_negation", llm=llm,
+    )
+    for original, poisoned in zip(EXAMPLES, result):
+        if not original["evidence"]:
+            continue
+        for passage in poisoned["evidence"]:
+            assert passage.startswith("NEGATED::"), (
+                f"expected LLM-generated passage, got {passage!r}"
+            )
+
+
+def test_llm_negation_calls_llm_once_per_poisoned_passage():
+    llm = _FakeLLM()
+    poison_dataset(
+        EXAMPLES, poison_rate=1.0, seed=42, strategy="llm_negation", llm=llm,
+    )
+    expected_calls = sum(len(ex["evidence"]) for ex in EXAMPLES)
+    assert len(llm.calls) == expected_calls
+
+
+def test_llm_negation_tracks_poisoned_positions():
+    llm = _FakeLLM()
+    result = poison_dataset(
+        EXAMPLES, poison_rate=1.0, seed=42, strategy="llm_negation", llm=llm,
+    )
+    for original, poisoned in zip(EXAMPLES, result):
+        if not original["evidence"]:
+            assert "poisoned_positions" not in poisoned
+        else:
+            assert poisoned["poisoned_positions"] == set(range(len(original["evidence"])))
+
+
+def test_llm_negation_prompt_includes_original_passage():
+    llm = _FakeLLM()
+    poison_dataset(
+        EXAMPLES, poison_rate=1.0, seed=42, strategy="llm_negation", llm=llm,
+    )
+    all_evidence = {p for ex in EXAMPLES for p in ex["evidence"]}
+    for prompt in llm.calls:
+        assert any(p in prompt for p in all_evidence), (
+            f"prompt does not include any original passage: {prompt!r}"
+        )
+
+
 def test_sample_without_replacement():
     """When pool is large enough, distractors must be unique (no duplicates)."""
     result = poison_dataset(EXAMPLES, poison_rate=1.0)

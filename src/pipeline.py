@@ -66,6 +66,12 @@ def main(argv=None) -> dict:
     parser.add_argument("--dataset", default=None, choices=["fever", "hotpotqa"])
     parser.add_argument("--n", type=int, default=None, help="Number of examples (overrides config)")
     parser.add_argument("--poison_rate", type=float, default=None, help="Fraction of evidence replaced")
+    parser.add_argument(
+        "--strategy",
+        default=None,
+        choices=["opposite_label", "llm_negation"],
+        help="Poisoning strategy (overrides poisoning.strategy in config)",
+    )
     parser.add_argument("--model", default=None, help="LLM model name")
     parser.add_argument(
         "--prompt_type",
@@ -82,23 +88,11 @@ def main(argv=None) -> dict:
     seed = args.seed if args.seed is not None else cfg["seed"]
     n = args.n if args.n is not None else cfg["evaluation"]["n_examples"]
     poison_rate = args.poison_rate if args.poison_rate is not None else cfg["poisoning"]["poison_rate"]
+    strategy = args.strategy if args.strategy is not None else cfg["poisoning"].get("strategy", "opposite_label")
     model = args.model if args.model is not None else cfg["models"]["default"]
     dataset = args.dataset if args.dataset is not None else cfg["dataset"].get("default", "fever")
     sc_runs = (args.self_consistency_runs if args.self_consistency_runs is not None
                else cfg["evaluation"].get("self_consistency_runs", 1))
-
-    if dataset == "fever":
-        prompt_type = args.prompt_type if args.prompt_type is not None else cfg["prompts"]["default"]
-        examples = load_fever(cfg["dataset"]["fever_dev"], max_examples=n)
-        if poison_rate > 0.0:
-            examples = poison_dataset(examples, poison_rate=poison_rate, seed=seed)
-    elif dataset == "hotpotqa":
-        prompt_type = args.prompt_type if args.prompt_type is not None else cfg["prompts"].get("default_qa", "standard_qa")
-        examples = load_hotpotqa(cfg["dataset"]["hotpotqa_dev"], max_examples=n)
-        if poison_rate > 0.0:
-            examples = poison_hotpotqa(examples, poison_rate=poison_rate, seed=seed)
-    else:
-        raise ValueError(f"Unknown dataset {dataset!r}")
 
     emb_cache = os.path.join(cfg["cache"]["dir"], cfg["cache"]["embeddings_subdir"])
     embedder = Embedder(
@@ -106,19 +100,32 @@ def main(argv=None) -> dict:
         cache_dir=emb_cache,
     )
     retriever = Retriever(embedder=embedder, k=cfg["retrieval"]["k"])
-
     llm = _build_llm(model, cfg)
 
     with embedder, llm:
         if dataset == "fever":
+            prompt_type = args.prompt_type if args.prompt_type is not None else cfg["prompts"]["default"]
+            examples = load_fever(cfg["dataset"]["fever_dev"], max_examples=n)
+            if poison_rate > 0.0:
+                examples = poison_dataset(
+                    examples, poison_rate=poison_rate, seed=seed,
+                    strategy=strategy, llm=llm,
+                )
             metrics = _run_fever(examples, retriever, llm, prompt_type, cfg, seed, sc_runs)
-        else:
+        elif dataset == "hotpotqa":
+            prompt_type = args.prompt_type if args.prompt_type is not None else cfg["prompts"].get("default_qa", "standard_qa")
+            examples = load_hotpotqa(cfg["dataset"]["hotpotqa_dev"], max_examples=n)
+            if poison_rate > 0.0:
+                examples = poison_hotpotqa(examples, poison_rate=poison_rate, seed=seed)
             metrics = _run_hotpotqa(examples, retriever, llm, prompt_type, cfg, seed, sc_runs)
+        else:
+            raise ValueError(f"Unknown dataset {dataset!r}")
 
     run_cfg = {
         "dataset": dataset,
         "n": n,
         "poison_rate": poison_rate,
+        "strategy": strategy,
         "model": model,
         "prompt_type": prompt_type,
         "seed": seed,
