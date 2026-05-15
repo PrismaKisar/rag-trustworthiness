@@ -257,6 +257,46 @@ def test_pipeline_routes_to_hotpotqa(tmp_path):
         assert 0.0 <= metrics[key] <= 1.0
 
 
+def test_custom_dataset_registered_and_dispatched():
+    """A DatasetRunner added to _DATASET_REGISTRY is dispatched through main()."""
+    import numpy as np
+    from src.pipeline import DatasetRunner, _DATASET_REGISTRY
+
+    metrics_stub = {"custom_metric": 0.75}
+    mock_runner_fn = MagicMock(return_value=metrics_stub)
+
+    custom_runner = DatasetRunner(
+        runner=mock_runner_fn,
+        default_prompt_fn=lambda cfg: "standard",
+    )
+    _DATASET_REGISTRY["custom"] = custom_runner
+    try:
+        with (
+            patch("src.pipeline.Embedder") as MockEmbedder,
+            patch("src.pipeline._build_llm", return_value=MagicMock()),
+        ):
+            embedder_instance = MagicMock()
+            embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
+                (len(texts), 384)
+            ).astype("float32")
+            embedder_instance.embedding_dim = 384
+            MockEmbedder.return_value = embedder_instance
+
+            result = main([
+                "--config", "configs/config.yaml",
+                "--dataset", "custom",
+                "--n", "1",
+                "--poison_rate", "0.0",
+                "--seed", "42",
+                "--self_consistency_runs", "1",
+            ])
+
+        mock_runner_fn.assert_called_once()
+        assert result == metrics_stub
+    finally:
+        del _DATASET_REGISTRY["custom"]
+
+
 def test_pipeline_hotpotqa_poisoner_invoked(tmp_path):
     """When dataset=hotpotqa and poison_rate>0, the HotpotQA poisoner runs."""
     mock_llm = MagicMock()

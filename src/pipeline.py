@@ -10,6 +10,8 @@ Each path uses its native schema and metrics; no normalisation is forced.
 import argparse
 import json
 import os
+from dataclasses import dataclass
+from typing import Callable
 
 import yaml
 
@@ -22,6 +24,17 @@ from src.evaluation.scorer import run as run_scorer
 from src.generation.llm_client import HuggingFaceClient
 from src.retrieval.embedder import Embedder
 from src.retrieval.retriever import Retriever
+
+
+@dataclass(frozen=True)
+class DatasetRunner:
+    """Single registration point for one dataset.
+
+    runner: (cfg, n, poison_rate, seed, strategy, retriever, llm, prompt_type, sc_runs) -> metrics
+    default_prompt_fn: resolves the default prompt-type string from the config dict.
+    """
+    runner: Callable[..., dict[str, float]]
+    default_prompt_fn: Callable[[dict], str]
 
 
 def load_config(path: str) -> dict:
@@ -60,10 +73,38 @@ def _run_hotpotqa(examples, retriever, llm, prompt_type, cfg, seed, sc_runs):
     )
 
 
+def _fever_runner(cfg, n, poison_rate, seed, strategy, retriever, llm, prompt_type, sc_runs):
+    examples = load_fever(cfg["dataset"]["fever_dev"], max_examples=n)
+    if poison_rate > 0.0:
+        examples = poison_dataset(
+            examples, poison_rate=poison_rate, seed=seed, strategy=strategy, llm=llm,
+        )
+    return _run_fever(examples, retriever, llm, prompt_type, cfg, seed, sc_runs)
+
+
+def _hotpotqa_runner(cfg, n, poison_rate, seed, strategy, retriever, llm, prompt_type, sc_runs):
+    examples = load_hotpotqa(cfg["dataset"]["hotpotqa_dev"], max_examples=n)
+    if poison_rate > 0.0:
+        examples = poison_hotpotqa(examples, poison_rate=poison_rate, seed=seed)
+    return _run_hotpotqa(examples, retriever, llm, prompt_type, cfg, seed, sc_runs)
+
+
+_DATASET_REGISTRY: dict[str, DatasetRunner] = {
+    "fever": DatasetRunner(
+        runner=_fever_runner,
+        default_prompt_fn=lambda cfg: cfg["prompts"]["default"],
+    ),
+    "hotpotqa": DatasetRunner(
+        runner=_hotpotqa_runner,
+        default_prompt_fn=lambda cfg: cfg["prompts"].get("default_qa", "standard_qa"),
+    ),
+}
+
+
 def main(argv=None) -> dict:
     parser = argparse.ArgumentParser(description="RAG robustness pipeline")
     parser.add_argument("--config", default="configs/config.yaml", help="Path to config.yaml")
-    parser.add_argument("--dataset", default=None, choices=["fever", "hotpotqa"])
+    parser.add_argument("--dataset", default=None, choices=list(_DATASET_REGISTRY))
     parser.add_argument("--n", type=int, default=None, help="Number of examples (overrides config)")
     parser.add_argument("--poison_rate", type=float, default=None, help="Fraction of evidence replaced")
     parser.add_argument(
@@ -103,23 +144,9 @@ def main(argv=None) -> dict:
     llm = _build_llm(model, cfg)
 
     with embedder, llm:
-        if dataset == "fever":
-            prompt_type = args.prompt_type if args.prompt_type is not None else cfg["prompts"]["default"]
-            examples = load_fever(cfg["dataset"]["fever_dev"], max_examples=n)
-            if poison_rate > 0.0:
-                examples = poison_dataset(
-                    examples, poison_rate=poison_rate, seed=seed,
-                    strategy=strategy, llm=llm,
-                )
-            metrics = _run_fever(examples, retriever, llm, prompt_type, cfg, seed, sc_runs)
-        elif dataset == "hotpotqa":
-            prompt_type = args.prompt_type if args.prompt_type is not None else cfg["prompts"].get("default_qa", "standard_qa")
-            examples = load_hotpotqa(cfg["dataset"]["hotpotqa_dev"], max_examples=n)
-            if poison_rate > 0.0:
-                examples = poison_hotpotqa(examples, poison_rate=poison_rate, seed=seed)
-            metrics = _run_hotpotqa(examples, retriever, llm, prompt_type, cfg, seed, sc_runs)
-        else:
-            raise ValueError(f"Unknown dataset {dataset!r}")
+        ds = _DATASET_REGISTRY[dataset]
+        prompt_type = args.prompt_type if args.prompt_type is not None else ds.default_prompt_fn(cfg)
+        metrics = ds.runner(cfg, n, poison_rate, seed, strategy, retriever, llm, prompt_type, sc_runs)
 
     run_cfg = {
         "dataset": dataset,
