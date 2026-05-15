@@ -17,9 +17,9 @@ from __future__ import annotations
 import logging
 import random
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.evaluation.cases import QACase, QAResult
+from src.evaluation.dispatch import resolve_raw
 from src.evaluation.metrics import exact_match, precision_at_k, self_consistency, token_f1
 from src.generation.llm_client import LLMClient
 from src.generation.parser import extract_answer
@@ -113,25 +113,10 @@ def resolve(
     if not cases:
         return []
 
-    tasks = [
-        (case_idx, run_idx, prompt, case.max_tokens)
-        for case_idx, case in enumerate(cases)
-        for run_idx, prompt in enumerate(case.prompts)
-    ]
-
-    responses: dict[tuple[int, int], str] = {}
-    with ThreadPoolExecutor(max_workers=min(n_workers, len(tasks))) as pool:
-        future_to_key = {
-            pool.submit(llm.complete, prompt, max_tokens): (case_idx, run_idx)
-            for case_idx, run_idx, prompt, max_tokens in tasks
-        }
-        for future in as_completed(future_to_key):
-            key = future_to_key[future]
-            responses[key] = extract_answer(future.result())
-
+    raw_per_case = resolve_raw(cases, llm, n_workers=n_workers)
     results: list[QAResult] = []
-    for case_idx, case in enumerate(cases):
-        runs = [responses[(case_idx, j)] for j in range(len(case.prompts))]
+    for case_idx, (case, raw_runs) in enumerate(zip(cases, raw_per_case)):
+        runs = [extract_answer(r) for r in raw_runs]
         predicted = Counter(runs).most_common(1)[0][0]
         results.append(QAResult(
             case_index=case_idx,
