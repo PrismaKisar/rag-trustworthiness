@@ -4,6 +4,7 @@ import pytest
 
 from src.evaluation.metrics import (
     accuracy,
+    contradiction_detection_rate,
     hallucination_rate,
     macro_f1,
     precision_at_k,
@@ -210,3 +211,21 @@ class TestTokenF1:
     def test_empty_gold_returns_zero(self):
         from src.evaluation.metrics import token_f1
         assert token_f1("Marie Curie", "") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# contradiction_detection_rate
+# ---------------------------------------------------------------------------
+
+class TestContradictionDetectionRate:
+    def test_proportion_of_true_flags(self):
+        assert contradiction_detection_rate([True, True, False, True, False]) == pytest.approx(0.6)
+
+    def test_all_true(self):
+        assert contradiction_detection_rate([True, True, True]) == pytest.approx(1.0)
+
+    def test_all_false(self):
+        assert contradiction_detection_rate([False, False]) == pytest.approx(0.0)
+
+    def test_empty_list_returns_zero(self):
+        assert contradiction_detection_rate([]) == pytest.approx(0.0)
