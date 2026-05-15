@@ -20,9 +20,9 @@ from __future__ import annotations
 import logging
 import random
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.evaluation.cases import EvaluationCase, EvaluationResult
+from src.evaluation.dispatch import resolve_raw
 from src.evaluation.metrics import (
     accuracy,
     contradiction_detection_rate,
@@ -133,25 +133,9 @@ def resolve(
     if not cases:
         return []
 
-    tasks = [
-        (case_idx, run_idx, prompt, case.max_tokens)
-        for case_idx, case in enumerate(cases)
-        for run_idx, prompt in enumerate(case.prompts)
-    ]
-
-    raw_responses: dict[tuple[int, int], str] = {}
-    with ThreadPoolExecutor(max_workers=min(n_workers, len(tasks))) as pool:
-        future_to_key = {
-            pool.submit(llm.complete, prompt, max_tokens): (case_idx, run_idx)
-            for case_idx, run_idx, prompt, max_tokens in tasks
-        }
-        for future in as_completed(future_to_key):
-            key = future_to_key[future]
-            raw_responses[key] = future.result()
-
+    raw_per_case = resolve_raw(cases, llm, n_workers=n_workers)
     results: list[EvaluationResult] = []
-    for case_idx, case in enumerate(cases):
-        raw_runs = [raw_responses[(case_idx, j)] for j in range(len(case.prompts))]
+    for case_idx, (case, raw_runs) in enumerate(zip(cases, raw_per_case)):
         runs = [extract_label(r) for r in raw_runs]
         predicted = Counter(runs).most_common(1)[0][0]
         contradiction_flag = extract_contradiction_flag(raw_runs[0])
