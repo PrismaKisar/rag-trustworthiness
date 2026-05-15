@@ -139,6 +139,27 @@ def precision_at_k(retrieved: list[str], gold: list[str]) -> float:
     return sum(1 for p in retrieved if p in gold_set) / len(retrieved)
 
 
+def qa_hallucination_rate(
+    predicted_answers: list[str],
+    retrieved_passages_per_case: list[list[str]],
+) -> float:
+    """Fraction of predicted answers with zero token overlap with any retrieved passage.
+
+    Operationalises grounding failure: an answer not supported by any token
+    in the retrieved evidence is considered hallucinated (generated from
+    parametric memory alone). Attribution: inspired by Lewis et al. 2020 —
+    RAG reduces hallucination by grounding answers in retrieved passages.
+    """
+    if not predicted_answers:
+        return 0.0
+    hallucinated = 0
+    for pred, passages in zip(predicted_answers, retrieved_passages_per_case):
+        passage_text = " ".join(passages)
+        if token_f1(pred, passage_text) == 0.0:
+            hallucinated += 1
+    return hallucinated / len(predicted_answers)
+
+
 def contradiction_detection_rate(flags: list[bool]) -> float:
     """Fraction of results where the model explicitly flagged a contradiction.
 

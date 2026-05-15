@@ -20,7 +20,7 @@ from collections import Counter
 
 from src.evaluation.cases import QACase, QAResult
 from src.evaluation.dispatch import resolve_raw
-from src.evaluation.metrics import exact_match, precision_at_k, self_consistency, token_f1
+from src.evaluation.metrics import exact_match, precision_at_k, qa_hallucination_rate, self_consistency, token_f1
 from src.generation.llm_client import LLMClient
 from src.generation.parser import extract_answer
 from src.generation.prompts import QAPromptType, format_prompt
@@ -137,6 +137,10 @@ def aggregate(
         "exact_match": sum(em_scores) / len(em_scores),
         "token_f1": sum(f1_scores) / len(f1_scores),
         "precision_at_k": sum(precisions) / len(precisions),
+        "hallucination_rate": qa_hallucination_rate(
+            [r.predicted_answer for r in results],
+            [case.passages for case in cases],
+        ),
     }
 
     if len(cases[0].prompts) > 1:
