@@ -8,9 +8,12 @@ Metrics defined in "the pipeline.md" §5, grounded in:
 
 from __future__ import annotations
 
+import math
 import re
 import string
 from collections import Counter
+
+from scipy import stats
 
 LABELS = ("SUPPORTS", "REFUTES", "NOT ENOUGH INFO")
 
@@ -148,3 +151,32 @@ def contradiction_detection_rate(flags: list[bool]) -> float:
     if not flags:
         return 0.0
     return sum(flags) / len(flags)
+
+
+def retrieval_accuracy_correlation(
+    precision_vals: list[float],
+    accuracy_vals: list[float],
+) -> dict[str, float]:
+    """Pearson and Spearman correlation between precision@k and accuracy.
+
+    Args:
+        precision_vals: Per-condition precision@k values.
+        accuracy_vals:  Corresponding accuracy values.
+
+    Returns:
+        Dict with keys ``pearson_r``, ``pearson_p``, ``spearman_r``, ``spearman_p``.
+        All values are NaN when the input is empty or either series is constant.
+    """
+    nan = float("nan")
+    _nan_result = {"pearson_r": nan, "pearson_p": nan, "spearman_r": nan, "spearman_p": nan}
+
+    if len(precision_vals) < 2 or len(accuracy_vals) < 2:
+        return _nan_result
+
+    pr, sp = stats.pearsonr(precision_vals, accuracy_vals), stats.spearmanr(precision_vals, accuracy_vals)
+    return {
+        "pearson_r":  float(pr.statistic),
+        "pearson_p":  float(pr.pvalue),
+        "spearman_r": float(sp.statistic),
+        "spearman_p": float(sp.pvalue),
+    }

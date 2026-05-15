@@ -8,6 +8,7 @@ from src.evaluation.metrics import (
     hallucination_rate,
     macro_f1,
     precision_at_k,
+    retrieval_accuracy_correlation,
     self_consistency,
 )
 
@@ -229,3 +230,48 @@ class TestContradictionDetectionRate:
 
     def test_empty_list_returns_zero(self):
         assert contradiction_detection_rate([]) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# retrieval_accuracy_correlation
+# ---------------------------------------------------------------------------
+
+class TestRetrievalAccuracyCorrelation:
+    def test_perfect_positive_correlation(self):
+        vals = [0.0, 0.25, 0.5, 0.75, 1.0]
+        result = retrieval_accuracy_correlation(vals, vals)
+        assert result["pearson_r"] == pytest.approx(1.0, abs=1e-9)
+        assert result["spearman_r"] == pytest.approx(1.0, abs=1e-9)
+
+    def test_perfect_negative_correlation(self):
+        precision = [0.0, 0.25, 0.5, 0.75, 1.0]
+        accuracy_vals = [1.0, 0.75, 0.5, 0.25, 0.0]
+        result = retrieval_accuracy_correlation(precision, accuracy_vals)
+        assert result["pearson_r"] == pytest.approx(-1.0, abs=1e-9)
+        assert result["spearman_r"] == pytest.approx(-1.0, abs=1e-9)
+
+    def test_returns_all_keys(self):
+        result = retrieval_accuracy_correlation([0.1, 0.5, 0.9], [0.2, 0.6, 0.8])
+        assert set(result.keys()) == {"pearson_r", "pearson_p", "spearman_r", "spearman_p"}
+
+    def test_p_values_in_range(self):
+        import math
+        precision = [0.1 * i for i in range(10)]
+        accuracy_vals = [0.05 + 0.09 * i for i in range(10)]
+        result = retrieval_accuracy_correlation(precision, accuracy_vals)
+        assert 0.0 <= result["pearson_p"] <= 1.0
+        assert 0.0 <= result["spearman_p"] <= 1.0
+        assert not math.isnan(result["pearson_r"])
+        assert not math.isnan(result["spearman_r"])
+
+    def test_constant_series_returns_nan(self):
+        import math
+        result = retrieval_accuracy_correlation([0.5, 0.5, 0.5], [0.1, 0.5, 0.9])
+        assert math.isnan(result["pearson_r"])
+        assert math.isnan(result["spearman_r"])
+
+    def test_empty_returns_nan(self):
+        import math
+        result = retrieval_accuracy_correlation([], [])
+        assert math.isnan(result["pearson_r"])
+        assert math.isnan(result["spearman_r"])
