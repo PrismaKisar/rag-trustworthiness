@@ -23,7 +23,7 @@ from src.evaluation.dispatch import resolve_raw
 from src.evaluation.metrics import exact_match, precision_at_k, self_consistency, token_f1
 from src.generation.llm_client import LLMClient
 from src.generation.parser import extract_answer
-from src.generation.prompts import QAPromptType, format_qa_prompt
+from src.generation.prompts import QAPromptType, format_prompt
 from src.retrieval.corpus import build_hotpotqa_corpus
 from src.retrieval.retriever import Retriever
 
@@ -61,11 +61,11 @@ def prepare_cases(
         gold_passages = [corpus.passages[j] for j in corpus.gold_indices]
 
         rng = random.Random(seed + i)
-        prompts = [format_qa_prompt(example["question"], passages, prompt_type)]
+        prompts = [format_prompt(example["question"], passages, prompt_type)]
         for _ in range(sc_runs - 1):
             shuffled = list(passages)
             rng.shuffle(shuffled)
-            prompts.append(format_qa_prompt(example["question"], shuffled, prompt_type))
+            prompts.append(format_prompt(example["question"], shuffled, prompt_type))
 
         cases.append(QACase(
             question=example["question"],

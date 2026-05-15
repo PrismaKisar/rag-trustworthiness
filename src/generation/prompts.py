@@ -1,11 +1,10 @@
-"""Prompt templates for RAG-based fact verification.
+"""Prompt templates for RAG-based fact verification and QA.
 
-Three variants are supported:
-- ``standard``        — direct classification prompt (Singal et al. 2024, Figure 5).
-- ``chain_of_thought`` — step-by-step reasoning before label (Zhou et al. 2024 §2.1).
-- ``vigilant``        — cross-passage consistency check before deciding
-                        (Zhou et al. 2024 vigilant prompting + Singal et al. 2024
-                        evidence-backed requirement; our own composition).
+Six variants across two tasks:
+- FEVER (claim verification): ``standard``, ``chain_of_thought``, ``vigilant``
+- HotpotQA (multi-hop QA):    ``standard_qa``, ``cot_qa``, ``vigilant_qa``
+
+All six are accessible via the single ``format_prompt`` entry point.
 
 Attribution:
     Standard prompt format — Singal et al. 2024 §4, Figure 5.
@@ -15,9 +14,11 @@ Attribution:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal
 
 PromptType = Literal["standard", "chain_of_thought", "vigilant"]
+QAPromptType = Literal["standard_qa", "cot_qa", "vigilant_qa"]
 
 _STANDARD = """\
 You are a fact-checker. Given the following claim and retrieved passages, \
@@ -49,19 +50,6 @@ Passages:
 
 Consistency check: [are passages consistent?]
 Final Label (SUPPORTS / REFUTES / NOT ENOUGH INFO):"""
-
-_TEMPLATES: dict[PromptType, str] = {
-    "standard": _STANDARD,
-    "chain_of_thought": _CHAIN_OF_THOUGHT,
-    "vigilant": _VIGILANT,
-}
-
-
-# ---------------------------------------------------------------------------
-# QA prompt templates (HotpotQA)
-# ---------------------------------------------------------------------------
-
-QAPromptType = Literal["standard_qa", "cot_qa", "vigilant_qa"]
 
 _STANDARD_QA = """\
 You are answering a question using only the given passages. Reply with the \
@@ -96,24 +84,34 @@ Passages:
 Consistency check: [are passages consistent?]
 Final Answer:"""
 
-_QA_TEMPLATES: dict[QAPromptType, str] = {
-    "standard_qa": _STANDARD_QA,
-    "cot_qa": _COT_QA,
-    "vigilant_qa": _VIGILANT_QA,
+
+@dataclass(frozen=True)
+class _PromptEntry:
+    template: str
+    query_kwarg: str
+
+
+_REGISTRY: dict[str, _PromptEntry] = {
+    "standard":        _PromptEntry(_STANDARD,       "claim"),
+    "chain_of_thought": _PromptEntry(_CHAIN_OF_THOUGHT, "claim"),
+    "vigilant":        _PromptEntry(_VIGILANT,        "claim"),
+    "standard_qa":     _PromptEntry(_STANDARD_QA,    "question"),
+    "cot_qa":          _PromptEntry(_COT_QA,          "question"),
+    "vigilant_qa":     _PromptEntry(_VIGILANT_QA,     "question"),
 }
 
 
 def format_prompt(
-    claim: str,
+    query: str,
     passages: list[str],
-    prompt_type: PromptType = "standard",
+    prompt_type: str = "standard",
 ) -> str:
-    """Format *claim* and *passages* into a prompt string.
+    """Format *query* and *passages* into a prompt string.
 
     Args:
-        claim: The claim text to verify.
-        passages: Retrieved passage strings (gold + possibly poisoned).
-        prompt_type: One of ``"standard"``, ``"chain_of_thought"``, ``"vigilant"``.
+        query: The claim text (FEVER) or question text (HotpotQA).
+        passages: Retrieved passage strings.
+        prompt_type: One of the six registered prompt types.
 
     Returns:
         Fully formatted prompt ready to send to an LLM.
@@ -121,25 +119,13 @@ def format_prompt(
     Raises:
         ValueError: If *prompt_type* is not a recognised template name.
     """
-    if prompt_type not in _TEMPLATES:
+    if prompt_type not in _REGISTRY:
         raise ValueError(
             f"Unknown prompt_type {prompt_type!r}. "
-            f"Choose from: {sorted(_TEMPLATES)}"
+            f"Choose from: {sorted(_REGISTRY)}"
         )
+    entry = _REGISTRY[prompt_type]
     numbered = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(passages))
-    return _TEMPLATES[prompt_type].format(claim=claim, passages=numbered)
+    return entry.template.format(**{entry.query_kwarg: query, "passages": numbered})
 
 
-def format_qa_prompt(
-    question: str,
-    passages: list[str],
-    prompt_type: QAPromptType = "standard_qa",
-) -> str:
-    """Format a QA prompt for HotpotQA-style open-answer evaluation."""
-    if prompt_type not in _QA_TEMPLATES:
-        raise ValueError(
-            f"Unknown prompt_type {prompt_type!r}. "
-            f"Choose from: {sorted(_QA_TEMPLATES)}"
-        )
-    numbered = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(passages))
-    return _QA_TEMPLATES[prompt_type].format(question=question, passages=numbered)
