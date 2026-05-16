@@ -5,9 +5,9 @@ embedding to disk keyed by SHA-256 hash of the raw text.  Re-runs and
 notebook restarts therefore incur no re-computation cost.
 
 Attribution:
-    Embedding model choice (all-MiniLM-L6-v2, inner-product search) and the
-    frozen-retriever design decision — Lewis et al. 2020, §3 (DPR-based dense
-    retrieval); deviation from joint training documented in pipeline.md §8.
+    Embedding model (IEITYuan/Yuan-embedding-2.0-en) selected as top MTEB
+    English Retrieval at experiment time; frozen-retriever design follows
+    Lewis et al. 2020, §3 (documented in pipeline.md §8).
     Caching strategy — Zhou et al. 2024 §2.1 (cost-bounded experimentation).
 """
 
@@ -25,34 +25,45 @@ from sentence_transformers import SentenceTransformer
 logger = logging.getLogger(__name__)
 
 
+def _best_device() -> str:
+    """Return the best available torch device: cuda > mps > cpu."""
+    import torch
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 class Embedder:
     """Encode texts to dense vectors, with transparent disk caching.
 
     Args:
         model_name: A ``sentence-transformers`` model identifier.
         cache_dir: Directory for the ``diskcache`` store.  Created if absent.
-        device: Torch device string (``"cpu"``, ``"cuda"``, …).  Defaults to
-                ``"cpu"`` for CPU-only reproducibility (pipeline.md §8).
+        device: Torch device string (``"cuda"``, ``"mps"``, ``"cpu"``).
+                ``None`` (default) auto-selects: cuda > mps > cpu.
         batch_size: Number of texts encoded per forward pass.
     """
 
     def __init__(
         self,
-        model_name: str = "all-MiniLM-L6-v2",
+        model_name: str = "IEITYuan/Yuan-embedding-2.0-en",
         cache_dir: str | os.PathLike = ".cache/embeddings",
-        device: str = "cpu",
+        device: str | None = None,
         batch_size: int = 64,
     ) -> None:
         self._model_name = model_name
         self._batch_size = batch_size
         self._cache = diskcache.Cache(str(cache_dir))
-        logger.info("Loading embedding model '%s' on %s", model_name, device)
+        resolved_device = device if device is not None else _best_device()
+        logger.info("Loading embedding model '%s' on %s", model_name, resolved_device)
         # Suppress harmless load-time warnings from transformers/sentence-transformers:
         # BertModel LOAD REPORT (unexpected keys) and "layers were not sharded".
         logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
         logging.getLogger("transformers.integrations.tensor_parallel").setLevel(logging.ERROR)
         logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
-        self._model = SentenceTransformer(model_name, device=device)
+        self._model = SentenceTransformer(model_name, device=resolved_device)
 
     # ------------------------------------------------------------------
     # Public API
@@ -106,7 +117,7 @@ class Embedder:
     @property
     def embedding_dim(self) -> int:
         """Dimensionality of the embedding space."""
-        return self._model.get_sentence_embedding_dimension()
+        return self._model.get_embedding_dimension()
 
     def close(self) -> None:
         """Flush and close the disk cache."""

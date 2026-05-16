@@ -10,7 +10,7 @@ dataset:
 
 # --- Retrieval ---
 retrieval:
-  embedding_model: "all-MiniLM-L6-v2"
+  embedding_model: "IEITYuan/Yuan-embedding-2.0-en"
   k: 5                        # top-K passages returned to the LLM
   distractor_pool_size: 20    # random passages added to per-example retrieval pool
 
