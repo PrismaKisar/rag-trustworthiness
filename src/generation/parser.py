@@ -1,6 +1,6 @@
 """Robust label extractor for LLM fact-verification responses.
 
-Extraction strategy (Singal et al. 2024, §4.2 — evidence extraction and label parsing):
+Extraction strategy (Singal et al. 2024, §4.2 - evidence extraction and label parsing):
   1. Regex scan for ``Final Label:`` marker (used by chain_of_thought and vigilant prompts).
   2. Fallback keyword scan anywhere in the text.
   3. Default to ``NOT ENOUGH INFO`` when nothing matches.

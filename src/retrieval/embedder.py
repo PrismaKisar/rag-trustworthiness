@@ -8,7 +8,7 @@ Attribution:
     Embedding model (IEITYuan/Yuan-embedding-2.0-en) selected as top MTEB
     English Retrieval at experiment time; frozen-retriever design follows
     Lewis et al. 2020, §3 (documented in pipeline.md §8).
-    Caching strategy — Zhou et al. 2024 §2.1 (cost-bounded experimentation).
+    Caching strategy - Zhou et al. 2024 §2.1 (cost-bounded experimentation).
 """
 
 from __future__ import annotations

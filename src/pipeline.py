@@ -1,4 +1,4 @@
-"""End-to-end RAG robustness pipeline — CLI entry point.
+"""End-to-end RAG robustness pipeline - CLI entry point.
 
 Two dataset paths are supported and selected via ``--dataset``:
 

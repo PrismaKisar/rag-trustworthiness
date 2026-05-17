@@ -1,4 +1,4 @@
-"""Tests for src/data/fever_loader.py — no real FEVER data required."""
+"""Tests for src/data/fever_loader.py - no real FEVER data required."""
 
 import json
 from pathlib import Path
@@ -97,7 +97,7 @@ def test_wiki_pages_dir_kwarg_rejected(fever_file, tmp_path: Path):
 
 
 def test_old_fever_format_ignored(tmp_path: Path):
-    """Legacy nested evidence (list[list[list]]) is not dereferenced — falls back to []."""
+    """Legacy nested evidence (list[list[list]]) is not dereferenced - falls back to []."""
     row = {
         "id": 99,
         "label": "SUPPORTS",

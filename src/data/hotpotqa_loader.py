@@ -2,7 +2,7 @@
 
 HotpotQA is a multi-hop QA benchmark. Each example carries a question whose
 answer requires reasoning across two Wikipedia paragraphs. The schema is kept
-faithful to the upstream dataset (Yang et al., 2018) — we do NOT normalise it
+faithful to the upstream dataset (Yang et al., 2018) - we do NOT normalise it
 to the FEVER claim/evidence/label shape.
 
 Schema per example:
@@ -11,7 +11,7 @@ Schema per example:
     supporting_facts: list[[title, sentence_idx]]
     context:          list[[title, [sentence, ...]]]
 
-Attribution: Yang et al., 2018 — HotpotQA dataset.
+Attribution: Yang et al., 2018 - HotpotQA dataset.
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@ Decouples the three-phase scorer structure from dataset-specific logic.
 Any object implementing EvaluationTask can be driven through run_pipeline.
 
 Attribution:
-    Deep-module pattern — Ousterhout, "A Philosophy of Software Design" §4.
+    Deep-module pattern - Ousterhout, "A Philosophy of Software Design" §4.
 """
 
 from __future__ import annotations

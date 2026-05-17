@@ -258,7 +258,7 @@ def test_pipeline_routes_to_hotpotqa(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Candidate #3: DatasetRunner deepened — loader + task + poisoner fields
+# Candidate #3: DatasetRunner deepened - loader + task + poisoner fields
 # ---------------------------------------------------------------------------
 
 

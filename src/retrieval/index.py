@@ -4,7 +4,7 @@ Wraps faiss.IndexFlatIP (inner-product = cosine similarity when vectors are
 L2-normalised) with a minimal add/search/save/load API.
 
 Attribution:
-    Dense retrieval with inner-product search over passage embeddings —
+    Dense retrieval with inner-product search over passage embeddings -
     Lewis et al. 2020, §3 (DPR + FAISS); CPU-only exact-search design
     documented in pipeline.md §8.
 """

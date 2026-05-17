@@ -16,13 +16,13 @@ def classify_failure(case: EvaluationCase, result: EvaluationResult) -> FailureT
     """Classify one (case, result) pair into a failure category.
 
     Returns:
-        ``"correct"``                   — prediction matches gold label.
-        ``"nei_collapse"``              — model predicts NOT ENOUGH INFO for a
+        ``"correct"``                   - prediction matches gold label.
+        ``"nei_collapse"``              - model predicts NOT ENOUGH INFO for a
                                           factual claim when no gold passages
                                           were retrieved.
-        ``"convinced_by_minority_poison"`` — wrong prediction despite a majority
+        ``"convinced_by_minority_poison"`` - wrong prediction despite a majority
                                           of retrieved passages being gold evidence.
-        ``"other_error"``               — wrong prediction not covered above.
+        ``"other_error"``               - wrong prediction not covered above.
     """
     if result.predicted_label == case.gold_label:
         return "correct"
@@ -73,8 +73,8 @@ def find_vigilant_contrast_examples(
         standard_cases:   Cases run with the standard prompt.
         standard_results: Corresponding results for the standard prompt.
         vigilant_results: Results for the same cases run with the vigilant prompt.
-        kind:             ``"helped"`` — standard wrong, vigilant correct.
-                          ``"failed"`` — both standard and vigilant wrong.
+        kind:             ``"helped"`` - standard wrong, vigilant correct.
+                          ``"failed"`` - both standard and vigilant wrong.
         max_examples:     Maximum number of examples to return.
 
     Returns:

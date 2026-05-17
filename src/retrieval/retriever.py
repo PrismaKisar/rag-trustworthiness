@@ -5,7 +5,7 @@ demand and retrieves the K most relevant passages for an arbitrary query.
 
 Attribution:
     Dense retrieval paradigm (embed query → inner-product search over passage
-    index) — Lewis et al. 2020, §3 (DPR + FAISS).  Frozen retriever design
+    index) - Lewis et al. 2020, §3 (DPR + FAISS).  Frozen retriever design
     documented in pipeline.md §8.
 """
 

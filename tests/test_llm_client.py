@@ -41,7 +41,7 @@ def _make_client(
     ):
         mock_tokenizer = MagicMock()
         mock_tok_cls.from_pretrained.return_value = mock_tokenizer
-        mock_tokenizer.pad_token_id = 0  # already set — no override needed
+        mock_tokenizer.pad_token_id = 0  # already set - no override needed
         mock_tokenizer.eos_token_id = 1
 
         mock_hf_model = MagicMock()
@@ -81,7 +81,7 @@ def _setup_generate(mock_tokenizer: MagicMock, mock_hf_model: MagicMock, text: s
 
 
 # ---------------------------------------------------------------------------
-# HuggingFaceClient — basic completion
+# HuggingFaceClient - basic completion
 # ---------------------------------------------------------------------------
 
 
@@ -131,7 +131,7 @@ class TestHuggingFaceClientComplete:
 
 
 # ---------------------------------------------------------------------------
-# HuggingFaceClient — chat template
+# HuggingFaceClient - chat template
 # ---------------------------------------------------------------------------
 
 
@@ -154,7 +154,7 @@ class TestChatTemplate:
 
 
 # ---------------------------------------------------------------------------
-# HuggingFaceClient — pad_token_id fallback
+# HuggingFaceClient - pad_token_id fallback
 # ---------------------------------------------------------------------------
 
 
@@ -167,7 +167,7 @@ class TestPadTokenId:
         ):
             mock_tokenizer = MagicMock()
             mock_tok_cls.from_pretrained.return_value = mock_tokenizer
-            mock_tokenizer.pad_token_id = None   # missing — should be overridden
+            mock_tokenizer.pad_token_id = None   # missing - should be overridden
             mock_tokenizer.eos_token_id = 42
 
             mock_hf_model = MagicMock()
@@ -175,7 +175,7 @@ class TestPadTokenId:
             mock_hf_model.to.return_value = mock_hf_model
 
             client = HuggingFaceClient(cache_dir=tmp_path / "llm")
-            client._load_model()  # lazy — must be triggered explicitly to exercise fallback
+            client._load_model()  # lazy - must be triggered explicitly to exercise fallback
 
         assert mock_tokenizer.pad_token_id == 42
 
@@ -195,13 +195,13 @@ class TestPadTokenId:
             mock_hf_model.to.return_value = mock_hf_model
 
             client = HuggingFaceClient(cache_dir=tmp_path / "llm")
-            client._load_model()  # lazy — must be triggered explicitly
+            client._load_model()  # lazy - must be triggered explicitly
 
         assert mock_tokenizer.pad_token_id == 7  # unchanged
 
 
 # ---------------------------------------------------------------------------
-# HuggingFaceClient — generation parameters
+# HuggingFaceClient - generation parameters
 # ---------------------------------------------------------------------------
 
 
@@ -259,7 +259,7 @@ class TestCacheKey:
 
 
 # ---------------------------------------------------------------------------
-# LLMClient abstract base — _max_tokens must be declared in the base
+# LLMClient abstract base - _max_tokens must be declared in the base
 # ---------------------------------------------------------------------------
 
 
@@ -312,7 +312,7 @@ class TestLLMClientBase:
 
 
 # ---------------------------------------------------------------------------
-# HuggingFaceClient — close() / memory cleanup
+# HuggingFaceClient - close() / memory cleanup
 # ---------------------------------------------------------------------------
 
 
