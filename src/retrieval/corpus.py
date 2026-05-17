@@ -7,7 +7,7 @@ For each evaluated claim the retrieval pool is:
 The distractor passages ensure that top-K retrieval is non-trivial and that
 robustness can be meaningfully measured across poison rates.
 
-Architecture: Sequential RAG pipeline shape — Lewis et al. 2020 §3;
+Architecture: Sequential RAG pipeline shape - Lewis et al. 2020 §3;
 corpus-level distractor injection motivated by Zhou et al. 2024 §2.1.
 """
 
@@ -24,7 +24,7 @@ class RetrievalCorpus:
     Attributes:
         passages: All passages in the pool (evidence + distractors).
         gold_indices: Indices of passages that came from the example's own
-                      evidence field — used to compute precision@k.
+                      evidence field - used to compute recall@k.
     """
 
     passages: list[str]

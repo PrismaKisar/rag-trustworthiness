@@ -48,7 +48,7 @@ class TestRunBasic:
             assert 0.0 <= val <= 1.0
 
     def test_perfect_accuracy(self):
-        # Map each claim to the correct label — order-independent under parallel dispatch.
+        # Map each claim to the correct label - order-independent under parallel dispatch.
         label_by_claim = {
             "The sky is blue.": "SUPPORTS",
             "Cats can fly.": "REFUTES",

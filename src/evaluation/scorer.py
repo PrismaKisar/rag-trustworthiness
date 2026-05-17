@@ -1,17 +1,17 @@
 """Scorer: run a model over FEVER examples and return evaluation metrics.
 
 Three-phase pipeline:
-    prepare_cases  — sequential retrieval → list[EvaluationCase]
-    resolve        — parallel LLM calls   → list[EvaluationResult]
-    aggregate      — pure metric rollup   → dict[str, float]
+    prepare_cases  - sequential retrieval → list[EvaluationCase]
+    resolve        - parallel LLM calls   → list[EvaluationResult]
+    aggregate      - pure metric rollup   → dict[str, float]
 
 run() is a thin composer over the three phases with the same public signature
 as before.
 
 Attribution:
-    Sequential RAG pipeline for veracity prediction — Singal et al. 2024 §4.
-    Factuality metrics (accuracy, macro-F1, hallucination rate) — Zhou et al. 2024.
-    Self-consistency under passage-order perturbation — Wang et al. 2022
+    Sequential RAG pipeline for veracity prediction - Singal et al. 2024 §4.
+    Factuality metrics (accuracy, macro-F1, hallucination rate) - Zhou et al. 2024.
+    Self-consistency under passage-order perturbation - Wang et al. 2022
     (cited in Zhou 2024 §2.1 as a robustness-improving prompting technique).
 """
 
@@ -28,7 +28,7 @@ from src.evaluation.metrics import (
     contradiction_detection_rate,
     hallucination_rate,
     macro_f1,
-    precision_at_k,
+    recall_at_k,
     self_consistency,
 )
 from src.generation.llm_client import LLMClient
@@ -47,7 +47,7 @@ _DEFAULT_MAX_TOKENS: dict[str, int] = {
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 — retrieval (sequential: embedder / FAISS not thread-safe)
+# Phase 1 - retrieval (sequential: embedder / FAISS not thread-safe)
 # ---------------------------------------------------------------------------
 
 def prepare_cases(
@@ -105,7 +105,7 @@ def prepare_cases(
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — LLM calls (parallel: I/O-bound, cache is thread-safe)
+# Phase 2 - LLM calls (parallel: I/O-bound, cache is thread-safe)
 # ---------------------------------------------------------------------------
 
 def resolve(
@@ -148,7 +148,7 @@ def resolve(
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 — aggregate
+# Phase 3 - aggregate
 # ---------------------------------------------------------------------------
 
 def aggregate(
@@ -158,7 +158,7 @@ def aggregate(
 ) -> dict[str, float]:
     """Compute evaluation metrics from *cases* and *results*.
 
-    Pure function — no I/O, no randomness.
+    Pure function - no I/O, no randomness.
 
     Args:
         cases: Output of :func:`prepare_cases`.
@@ -168,13 +168,13 @@ def aggregate(
 
     Returns:
         Dict with ``accuracy``, ``macro_f1``, ``hallucination_rate``,
-        ``precision_at_k``, ``self_consistency`` (only when sc_runs > 1),
+        ``recall_at_k``, ``self_consistency`` (only when sc_runs > 1),
         and ``contradiction_detection_rate`` (only when prompt_type == "vigilant").
     """
     gold_labels = [case.gold_label for case in cases]
     predictions = [result.predicted_label for result in results]
     precisions = [
-        precision_at_k(case.passages, case.gold_passages)
+        recall_at_k(case.passages, case.gold_passages)
         for case in cases
     ]
 
@@ -182,7 +182,7 @@ def aggregate(
         "accuracy": accuracy(predictions, gold_labels),
         "macro_f1": macro_f1(predictions, gold_labels),
         "hallucination_rate": hallucination_rate(predictions, gold_labels),
-        "precision_at_k": sum(precisions) / len(precisions) if precisions else 0.0,
+        "recall_at_k": sum(precisions) / len(precisions) if precisions else 0.0,
     }
 
     if cases and len(cases[0].prompts) > 1:
@@ -197,7 +197,7 @@ def aggregate(
 
 
 # ---------------------------------------------------------------------------
-# Composer — preserves the original public signature
+# Composer - preserves the original public signature
 # ---------------------------------------------------------------------------
 
 def run(

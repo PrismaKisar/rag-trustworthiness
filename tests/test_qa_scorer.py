@@ -1,4 +1,4 @@
-"""Tests for src/evaluation/qa_scorer.py — three-phase QA pipeline."""
+"""Tests for src/evaluation/qa_scorer.py - three-phase QA pipeline."""
 
 from unittest.mock import MagicMock
 
@@ -265,7 +265,7 @@ class TestAggregate:
 
 
 # ---------------------------------------------------------------------------
-# run — composer
+# run - composer
 # ---------------------------------------------------------------------------
 
 

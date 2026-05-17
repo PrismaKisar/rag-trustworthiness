@@ -1,15 +1,15 @@
-"""Scorer for HotpotQA multi-hop QA — three-phase pipeline.
+"""Scorer for HotpotQA multi-hop QA - three-phase pipeline.
 
 Mirrors src/evaluation/scorer.py but operates on free-form answers:
-    prepare_cases  — sequential retrieval over HotpotQA context paragraphs
-    resolve        — parallel LLM calls, parse free-form answers
-    aggregate      — Exact-Match, token-F1, precision@k, self-consistency
+    prepare_cases  - sequential retrieval over HotpotQA context paragraphs
+    resolve        - parallel LLM calls, parse free-form answers
+    aggregate      - Exact-Match, token-F1, recall@k, self-consistency
 
 run() composes the three phases for end-to-end evaluation.
 
 Attribution:
-    Sequential RAG pipeline for QA — Lewis et al. 2020 §3.
-    HotpotQA evaluation (EM + token-F1) — Yang et al. 2018.
+    Sequential RAG pipeline for QA - Lewis et al. 2020 §3.
+    HotpotQA evaluation (EM + token-F1) - Yang et al. 2018.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from collections import Counter
 
 from src.evaluation.cases import QACase, QAResult
 from src.evaluation.dispatch import resolve_raw
-from src.evaluation.metrics import exact_match, precision_at_k, qa_hallucination_rate, self_consistency, token_f1
+from src.evaluation.metrics import exact_match, recall_at_k, qa_hallucination_rate, self_consistency, token_f1
 from src.generation.llm_client import LLMClient
 from src.generation.parser import extract_answer
 from src.generation.prompts import QAPromptType, format_prompt
@@ -37,7 +37,7 @@ _DEFAULT_MAX_TOKENS: dict[str, int] = {
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 — retrieval (sequential)
+# Phase 1 - retrieval (sequential)
 # ---------------------------------------------------------------------------
 
 
@@ -80,7 +80,7 @@ def prepare_cases(
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — LLM calls (parallel)
+# Phase 2 - LLM calls (parallel)
 # ---------------------------------------------------------------------------
 
 
@@ -108,7 +108,7 @@ def resolve(
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 — aggregate
+# Phase 3 - aggregate
 # ---------------------------------------------------------------------------
 
 
@@ -118,7 +118,7 @@ def aggregate(
 ) -> dict[str, float]:
     """Compute QA metrics from *cases* and *results*."""
     if not cases:
-        return {"exact_match": 0.0, "token_f1": 0.0, "precision_at_k": 0.0}
+        return {"exact_match": 0.0, "token_f1": 0.0, "recall_at_k": 0.0}
 
     em_scores = [
         exact_match(result.predicted_answer, case.gold_answer)
@@ -129,14 +129,14 @@ def aggregate(
         for case, result in zip(cases, results)
     ]
     precisions = [
-        precision_at_k(case.passages, case.gold_passages)
+        recall_at_k(case.passages, case.gold_passages)
         for case in cases
     ]
 
     metrics: dict[str, float] = {
         "exact_match": sum(em_scores) / len(em_scores),
         "token_f1": sum(f1_scores) / len(f1_scores),
-        "precision_at_k": sum(precisions) / len(precisions),
+        "recall_at_k": sum(precisions) / len(precisions),
         "hallucination_rate": qa_hallucination_rate(
             [r.predicted_answer for r in results],
             [case.passages for case in cases],
