@@ -35,13 +35,6 @@ models:
 prompts:
   default: "standard"         # FEVER prompts: standard, chain_of_thought, vigilant
   default_qa: "standard_qa"   # HotpotQA prompts: standard_qa, cot_qa, vigilant_qa
-  max_tokens:
-    standard: 64              # label only (~5 tokens), generous headroom
-    chain_of_thought: 512     # reasoning + label, k=5 passages → ~500 tokens
-    vigilant: 256             # consistency check (k=5 contradictions) + label → ~50-100 tokens
-    standard_qa: 64           # short free-form answer
-    cot_qa: 256               # reasoning + final short answer
-    vigilant_qa: 128          # consistency check + final short answer
 
 # --- Evaluation ---
 evaluation:

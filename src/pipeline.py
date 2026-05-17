@@ -135,7 +135,6 @@ def main(argv=None) -> dict:
             sc_runs=sc_runs,
             seed=seed,
             distractor_pool_size=cfg["retrieval"]["distractor_pool_size"],
-            max_tokens_by_prompt=cfg["prompts"]["max_tokens"],
         )
 
     run_cfg = {

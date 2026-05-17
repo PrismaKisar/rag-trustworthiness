@@ -29,12 +29,6 @@ from src.retrieval.retriever import Retriever
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MAX_TOKENS: dict[str, int] = {
-    "standard_qa": 64,
-    "cot_qa": 256,
-    "vigilant_qa": 128,
-}
-
 
 # ---------------------------------------------------------------------------
 # Phase 1 - retrieval (sequential)
@@ -46,13 +40,9 @@ def prepare_cases(
     retriever: Retriever,
     prompt_type: QAPromptType = "standard_qa",
     sc_runs: int = 1,
-    max_tokens_by_prompt: dict[str, int] | None = None,
     seed: int = 42,
 ) -> list[QACase]:
     """Build one QACase per HotpotQA example via sequential retrieval."""
-    tok_map = max_tokens_by_prompt if max_tokens_by_prompt is not None else _DEFAULT_MAX_TOKENS
-    max_tokens = tok_map.get(prompt_type, 128)
-
     cases: list[QACase] = []
     for i, example in enumerate(examples):
         corpus = build_hotpotqa_corpus(example)
@@ -73,7 +63,7 @@ def prepare_cases(
             passages=list(passages),
             gold_passages=gold_passages,
             prompts=prompts,
-            max_tokens=max_tokens,
+            prompt_type=prompt_type,
         ))
 
     return cases
@@ -162,7 +152,6 @@ def run(
     seed: int = 42,
     self_consistency_runs: int = 1,
     n_workers: int = 4,
-    max_tokens_by_prompt: dict[str, int] | None = None,
 ) -> dict[str, float]:
     """Run *llm* on every HotpotQA example and return aggregated metrics."""
     from src.evaluation.pipeline import run_pipeline
@@ -175,7 +164,6 @@ def run(
         sc_runs=self_consistency_runs,
         seed=seed,
         n_workers=n_workers,
-        max_tokens_by_prompt=max_tokens_by_prompt,
     )
 
 
@@ -202,7 +190,6 @@ class HotpotQATask:
             prompt_type=prompt_type,
             sc_runs=sc_runs,
             seed=seed,
-            max_tokens_by_prompt=kwargs.get("max_tokens_by_prompt"),
         )
 
     def parse_result(self, case_index: int, raw_runs: list[str]) -> QAResult:

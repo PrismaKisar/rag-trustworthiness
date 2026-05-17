@@ -32,7 +32,6 @@ HOTPOT_EXAMPLES = [
     },
 ]
 
-_MAX_TOKENS = {"standard_qa": 64, "cot_qa": 256, "vigilant_qa": 128}
 
 
 def _retriever(passages=("p1", "p2", "p3")):
@@ -55,49 +54,49 @@ def _llm(response="Warsaw"):
 class TestPrepareCases:
     def test_returns_one_case_per_example(self):
         from src.evaluation import qa_scorer
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever())
         assert len(cases) == len(HOTPOT_EXAMPLES)
 
     def test_gold_answer_matches(self):
         from src.evaluation import qa_scorer
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever())
         for case, ex in zip(cases, HOTPOT_EXAMPLES):
             assert case.gold_answer == ex["answer"]
 
     def test_question_matches(self):
         from src.evaluation import qa_scorer
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever())
         for case, ex in zip(cases, HOTPOT_EXAMPLES):
             assert case.question == ex["question"]
 
     def test_prompt_contains_question(self):
         from src.evaluation import qa_scorer
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever())
         for case in cases:
             assert case.question in case.prompts[0]
 
     def test_single_run_one_prompt(self):
         from src.evaluation import qa_scorer
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), sc_runs=1, max_tokens_by_prompt=_MAX_TOKENS)
+        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), sc_runs=1)
         for case in cases:
             assert len(case.prompts) == 1
 
     def test_multiple_runs_match_prompt_count(self):
         from src.evaluation import qa_scorer
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), sc_runs=4, max_tokens_by_prompt=_MAX_TOKENS)
+        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), sc_runs=4)
         for case in cases:
             assert len(case.prompts) == 4
 
     def test_passages_come_from_retriever(self):
         from src.evaluation import qa_scorer
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(("x", "y")), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(("x", "y")))
         for case in cases:
             assert case.passages == ["x", "y"]
 
     def test_gold_passages_include_supporting_paragraphs(self):
         """The gold paragraphs are those whose title appears in supporting_facts."""
         from src.evaluation import qa_scorer
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever())
         # For first example: supporting titles are "Marie Curie" and "Warsaw"
         case = cases[0]
         joined_marie = " ".join(HOTPOT_EXAMPLES[0]["context"][0][1])
@@ -108,20 +107,19 @@ class TestPrepareCases:
     def test_retriever_built_per_example(self):
         from src.evaluation import qa_scorer
         r = _retriever()
-        qa_scorer.prepare_cases(HOTPOT_EXAMPLES, r, max_tokens_by_prompt=_MAX_TOKENS)
+        qa_scorer.prepare_cases(HOTPOT_EXAMPLES, r)
         assert r.build.call_count == len(HOTPOT_EXAMPLES)
 
-    def test_max_tokens_from_dict(self):
+    def test_prompt_type_stored_on_case(self):
         from src.evaluation import qa_scorer
-        custom = {"standard_qa": 11, "cot_qa": 22, "vigilant_qa": 33}
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), prompt_type="cot_qa", max_tokens_by_prompt=custom)
+        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), prompt_type="cot_qa")
         for case in cases:
-            assert case.max_tokens == 22
+            assert case.prompt_type == "cot_qa"
 
     def test_returns_qa_case_instances(self):
         from src.evaluation import qa_scorer
         from src.evaluation.cases import QACase
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever())
         for case in cases:
             assert isinstance(case, QACase)
 
@@ -134,7 +132,7 @@ class TestPrepareCases:
 class TestResolve:
     def _make_cases(self, sc_runs=1):
         from src.evaluation import qa_scorer
-        return qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), sc_runs=sc_runs, max_tokens_by_prompt=_MAX_TOKENS)
+        return qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), sc_runs=sc_runs)
 
     def test_returns_one_result_per_case(self):
         from src.evaluation import qa_scorer
@@ -186,7 +184,7 @@ class TestAggregate:
                 passages=retrieved[i],
                 gold_passages=gold_passages[i],
                 prompts=["p"],
-                max_tokens=64,
+                prompt_type="standard_qa",
             )
             for i, gold in enumerate(gold_answers)
         ]
@@ -277,7 +275,6 @@ class TestRunComposer:
             retriever=_retriever(),
             llm=_llm("Final Answer: Warsaw"),
             prompt_type="standard_qa",
-            max_tokens_by_prompt=_MAX_TOKENS,
         )
         assert {"exact_match", "token_f1", "recall_at_k"} <= out.keys()
         for v in out.values():

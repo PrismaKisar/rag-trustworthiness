@@ -39,12 +39,6 @@ from src.retrieval.retriever import Retriever
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MAX_TOKENS: dict[str, int] = {
-    "standard": 64,
-    "chain_of_thought": 512,
-    "vigilant": 256,
-}
-
 
 # ---------------------------------------------------------------------------
 # Phase 1 - retrieval (sequential: embedder / FAISS not thread-safe)
@@ -56,7 +50,6 @@ def prepare_cases(
     prompt_type: PromptType = "standard",
     sc_runs: int = 1,
     distractor_pool_size: int = 20,
-    max_tokens_by_prompt: dict[str, int] | None = None,
     seed: int = 42,
 ) -> list[EvaluationCase]:
     """Build one EvaluationCase per example via sequential retrieval.
@@ -67,17 +60,12 @@ def prepare_cases(
         prompt_type: One of ``"standard"``, ``"chain_of_thought"``, ``"vigilant"``.
         sc_runs: Number of prompts per case (passages shuffled between runs ≥2).
         distractor_pool_size: Distractor passages added to each example corpus.
-        max_tokens_by_prompt: Maps prompt_type → max_tokens budget.  Defaults
-                              to ``_DEFAULT_MAX_TOKENS`` when ``None``.
         seed: Base random seed for corpus building and passage shuffling.
 
     Returns:
         List of :class:`~src.evaluation.cases.EvaluationCase` objects,
         one per example, in the same order.
     """
-    tok_map = max_tokens_by_prompt if max_tokens_by_prompt is not None else _DEFAULT_MAX_TOKENS
-    max_tokens = tok_map.get(prompt_type, 256)
-
     corpora = build_all_corpora(examples, distractor_pool_size=distractor_pool_size, seed=seed)
     cases: list[EvaluationCase] = []
     for i, (example, corpus) in enumerate(zip(examples, corpora)):
@@ -98,7 +86,7 @@ def prepare_cases(
             passages=list(passages),
             gold_passages=gold_passages,
             prompts=prompts,
-            max_tokens=max_tokens,
+            prompt_type=prompt_type,
         ))
 
     return cases
@@ -209,7 +197,6 @@ def run(
     seed: int = 42,
     self_consistency_runs: int = 1,
     n_workers: int = 4,
-    max_tokens_by_prompt: dict[str, int] | None = None,
 ) -> dict[str, float]:
     """Run *llm* on every example and return aggregated metrics."""
     from src.evaluation.pipeline import run_pipeline
@@ -223,7 +210,6 @@ def run(
         seed=seed,
         n_workers=n_workers,
         distractor_pool_size=distractor_pool_size,
-        max_tokens_by_prompt=max_tokens_by_prompt,
     )
 
 
@@ -251,7 +237,6 @@ class FeverTask:
             sc_runs=sc_runs,
             seed=seed,
             distractor_pool_size=kwargs.get("distractor_pool_size", 20),
-            max_tokens_by_prompt=kwargs.get("max_tokens_by_prompt"),
         )
 
     def parse_result(self, case_index: int, raw_runs: list[str]) -> EvaluationResult:

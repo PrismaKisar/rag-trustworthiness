@@ -17,9 +17,6 @@ EXAMPLES = [
     {"claim": "Unknown fact.", "evidence": ["Some text."], "label": "NOT ENOUGH INFO"},
 ]
 
-_MAX_TOKENS = {"standard": 64, "chain_of_thought": 512, "vigilant": 256}
-
-
 def _retriever(passages=("passage A", "passage B")):
     r = MagicMock()
     r.retrieve.return_value = list(passages)
@@ -38,82 +35,76 @@ def _llm(response="SUPPORTS"):
 
 class TestPrepareCases:
     def test_returns_one_case_per_example(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever())
         assert len(cases) == len(EXAMPLES)
 
     def test_gold_labels_match_examples(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever())
         for case, ex in zip(cases, EXAMPLES):
             assert case.gold_label == ex["label"]
 
     def test_claims_match_examples(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever())
         for case, ex in zip(cases, EXAMPLES):
             assert case.claim == ex["claim"]
 
     def test_single_run_yields_one_prompt_per_case(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=1, max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=1)
         for case in cases:
             assert len(case.prompts) == 1
 
     def test_multiple_runs_yields_matching_prompt_count(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=3, max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=3)
         for case in cases:
             assert len(case.prompts) == 3
 
     def test_prompt_contains_claim_text(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=1, max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=1)
         for case in cases:
             assert case.claim in case.prompts[0]
 
     def test_prompt_contains_retrieved_passages(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(("gold A", "gold B")), sc_runs=1, max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever(("gold A", "gold B")), sc_runs=1)
         for case in cases:
             assert "gold A" in case.prompts[0]
             assert "gold B" in case.prompts[0]
 
     def test_passages_come_from_retriever(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(("x", "y", "z")), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever(("x", "y", "z")))
         for case in cases:
             assert case.passages == ["x", "y", "z"]
 
     def test_gold_passages_are_strings(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever())
         for case in cases:
             assert isinstance(case.gold_passages, list)
             assert all(isinstance(p, str) for p in case.gold_passages)
 
     def test_gold_passages_contain_original_evidence(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever())
         for case, ex in zip(cases, EXAMPLES):
             for ev in ex["evidence"]:
                 assert ev in case.gold_passages
 
-    def test_max_tokens_from_dict(self):
-        custom = {"standard": 99, "chain_of_thought": 999, "vigilant": 499}
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), prompt_type="chain_of_thought", max_tokens_by_prompt=custom)
+    def test_prompt_type_stored_on_case(self):
+        cases = scorer.prepare_cases(EXAMPLES, _retriever(), prompt_type="chain_of_thought")
         for case in cases:
-            assert case.max_tokens == 999
-
-    def test_max_tokens_default_standard(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), prompt_type="standard")
-        for case in cases:
-            assert case.max_tokens == 64
+            assert case.prompt_type == "chain_of_thought"
 
     def test_retriever_build_called_per_example(self):
         r = _retriever()
-        scorer.prepare_cases(EXAMPLES, r, max_tokens_by_prompt=_MAX_TOKENS)
+        scorer.prepare_cases(EXAMPLES, r)
         assert r.build.call_count == len(EXAMPLES)
 
     def test_retriever_retrieve_called_per_example(self):
         r = _retriever()
-        scorer.prepare_cases(EXAMPLES, r, max_tokens_by_prompt=_MAX_TOKENS)
+        scorer.prepare_cases(EXAMPLES, r)
         assert r.retrieve.call_count == len(EXAMPLES)
 
     def test_sc_run_prompts_contain_same_passages(self):
         """All sc-run prompts for one case contain the same passages (just shuffled)."""
         passages = ("A", "B", "C")
-        cases = scorer.prepare_cases(EXAMPLES[:1], _retriever(passages), sc_runs=5, seed=0, max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES[:1], _retriever(passages), sc_runs=5, seed=0)
         case = cases[0]
         for prompt in case.prompts:
             for p in passages:
@@ -121,13 +112,13 @@ class TestPrepareCases:
 
     def test_deterministic_with_same_seed(self):
         r1, r2 = _retriever(), _retriever()
-        cases1 = scorer.prepare_cases(EXAMPLES, r1, sc_runs=3, seed=7, max_tokens_by_prompt=_MAX_TOKENS)
-        cases2 = scorer.prepare_cases(EXAMPLES, r2, sc_runs=3, seed=7, max_tokens_by_prompt=_MAX_TOKENS)
+        cases1 = scorer.prepare_cases(EXAMPLES, r1, sc_runs=3, seed=7)
+        cases2 = scorer.prepare_cases(EXAMPLES, r2, sc_runs=3, seed=7)
         for c1, c2 in zip(cases1, cases2):
             assert c1.prompts == c2.prompts
 
     def test_returns_evaluation_case_instances(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), max_tokens_by_prompt=_MAX_TOKENS)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever())
         for case in cases:
             assert isinstance(case, EvaluationCase)
 
@@ -136,8 +127,7 @@ class TestPrepareCases:
         from src.retrieval.corpus import build_all_corpora
         corpora = build_all_corpora(EXAMPLES, distractor_pool_size=5, seed=42)
         cases = scorer.prepare_cases(
-            EXAMPLES, _retriever(), distractor_pool_size=5, seed=42, max_tokens_by_prompt=_MAX_TOKENS
-        )
+            EXAMPLES, _retriever(), distractor_pool_size=5, seed=42,         )
         for case, corpus in zip(cases, corpora):
             expected_gold = [corpus.passages[j] for j in sorted(corpus.gold_indices)]
             assert case.gold_passages == expected_gold
@@ -149,7 +139,7 @@ class TestPrepareCases:
 
 class TestResolve:
     def _make_cases(self, sc_runs=1):
-        return scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=sc_runs, max_tokens_by_prompt=_MAX_TOKENS)
+        return scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=sc_runs)
 
     def test_returns_one_result_per_case(self):
         cases = self._make_cases()
@@ -201,7 +191,6 @@ class TestResolve:
             _retriever(),
             prompt_type="vigilant",
             sc_runs=1,
-            max_tokens_by_prompt=_MAX_TOKENS,
         )
         vigilant_response = (
             "Consistency check: The passages contradict each other.\n"
@@ -216,7 +205,6 @@ class TestResolve:
             _retriever(),
             prompt_type="vigilant",
             sc_runs=1,
-            max_tokens_by_prompt=_MAX_TOKENS,
         )
         consistent_response = (
             "Consistency check: The passages are consistent.\n"
@@ -241,7 +229,7 @@ class TestAggregate:
                 passages=["p"],
                 gold_passages=["p"],
                 prompts=["prompt"] * sc_runs,
-                max_tokens=64,
+                prompt_type="standard",
             )
             for i, gold in enumerate(gold_labels)
         ]
@@ -280,7 +268,7 @@ class TestAggregate:
                 claim="c", gold_label="SUPPORTS",
                 passages=["gold passage"],
                 gold_passages=["gold passage"],
-                prompts=["p"], max_tokens=64,
+                prompts=["p"], prompt_type="standard",
             )
         ]
         results = [EvaluationResult(case_index=0, runs=["SUPPORTS"], predicted_label="SUPPORTS")]
@@ -293,7 +281,7 @@ class TestAggregate:
                 claim="c", gold_label="SUPPORTS",
                 passages=["distractor"],
                 gold_passages=["gold passage"],
-                prompts=["p"], max_tokens=64,
+                prompts=["p"], prompt_type="standard",
             )
         ]
         results = [EvaluationResult(case_index=0, runs=["SUPPORTS"], predicted_label="SUPPORTS")]
