@@ -10,7 +10,7 @@ from src.evaluation.pipeline import run_pipeline
 class _FakeCase:
     def __init__(self, idx: int):
         self.prompts = [f"prompt_{idx}"]
-        self.max_tokens = 64
+        self.prompt_type = "standard"
 
 
 class _StubTask:
@@ -25,7 +25,7 @@ class _StubTask:
 
 
 class _StubLLM:
-    def complete(self, prompt: str, max_tokens: int) -> str:
+    def complete(self, prompt: str, prompt_type: str = "standard") -> str:
         return "raw_answer"
 
 
@@ -107,10 +107,8 @@ class TestTaskKwargsPassthrough:
             retriever=object(),
             llm=_StubLLM(),
             distractor_pool_size=99,
-            max_tokens_by_prompt={"standard": 32},
         )
         assert task.received_kwargs["distractor_pool_size"] == 99
-        assert task.received_kwargs["max_tokens_by_prompt"] == {"standard": 32}
 
 
 # ---------------------------------------------------------------------------

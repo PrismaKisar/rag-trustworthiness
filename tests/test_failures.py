@@ -20,7 +20,7 @@ def _case(gold_label="SUPPORTS", passages=None, gold_passages=None):
         passages=passages or ["g1", "g2", "g3", "g4", "g5"],
         gold_passages=gold_passages or ["g1", "g2", "g3", "g4", "g5"],
         prompts=["prompt text"],
-        max_tokens=64,
+        prompt_type="standard",
     )
 
 

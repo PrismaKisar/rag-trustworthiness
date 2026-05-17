@@ -9,8 +9,8 @@ def resolve_raw(cases: list, llm, n_workers: int = 4) -> list[list[str]]:
     """Dispatch parallel LLM calls for all prompts in *cases*.
 
     Args:
-        cases: Objects with ``.prompts`` (list[str]) and ``.max_tokens`` (int).
-        llm: LLM client with ``.complete(prompt, max_tokens) -> str``.
+        cases: Objects with ``.prompts`` (list[str]) and ``.prompt_type`` (str).
+        llm: LLM client with ``.complete(prompt, prompt_type) -> str``.
         n_workers: Thread-pool size.
 
     Returns:
@@ -21,7 +21,7 @@ def resolve_raw(cases: list, llm, n_workers: int = 4) -> list[list[str]]:
         return []
 
     tasks = [
-        (case_idx, run_idx, prompt, case.max_tokens)
+        (case_idx, run_idx, prompt, case.prompt_type)
         for case_idx, case in enumerate(cases)
         for run_idx, prompt in enumerate(case.prompts)
     ]
@@ -29,8 +29,8 @@ def resolve_raw(cases: list, llm, n_workers: int = 4) -> list[list[str]]:
     raw: dict[tuple[int, int], str] = {}
     with ThreadPoolExecutor(max_workers=min(n_workers, len(tasks))) as pool:
         future_to_key = {
-            pool.submit(llm.complete, prompt, max_tokens): (case_idx, run_idx)
-            for case_idx, run_idx, prompt, max_tokens in tasks
+            pool.submit(llm.complete, prompt, prompt_type): (case_idx, run_idx)
+            for case_idx, run_idx, prompt, prompt_type in tasks
         }
         for future in as_completed(future_to_key):
             key = future_to_key[future]

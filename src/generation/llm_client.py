@@ -2,7 +2,7 @@
 
 Exposes a uniform `.complete(prompt, prompt_type) -> str` interface over local
 Hugging Face causal (decoder-only) instruction-tuned models.  Responses are
-cached to disk keyed on (prompt_hash, model, prompt_type) so notebook re-runs
+cached to disk keyed on (prompt, model, prompt_type) so notebook re-runs
 are near-free.
 
 Attribution:
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 4
 _BACKOFF_BASE = 5.0  # seconds; wait = _BACKOFF_BASE * 2^attempt
+_MAX_NEW_TOKENS = 512  # fixed generation budget; large enough for all prompt types
 
 
 def _get_device() -> str:
@@ -62,11 +63,9 @@ class LLMClient(ABC):
         temperature: float = 0.0,
         cache_dir: str | os.PathLike = ".cache/llm_responses",
         requests_per_minute: int | None = None,
-        max_tokens: int = 256,
     ) -> None:
         self._model = model
         self._temperature = temperature
-        self._max_tokens = max_tokens
         self._cache = diskcache.Cache(str(cache_dir))
         self._min_interval = (60.0 / requests_per_minute) if requests_per_minute else 0.0
         self._last_call_time: float = 0.0
@@ -76,18 +75,17 @@ class LLMClient(ABC):
     # Public API
     # ------------------------------------------------------------------
 
-    def complete(self, prompt: str, max_tokens: int | None = None) -> str:
+    def complete(self, prompt: str, prompt_type: str = "standard") -> str:
         """Return the model completion for *prompt*, with caching and retry.
 
-        Cache key: SHA-256 of ``(prompt, model, temperature, max_tokens)``.
+        Cache key: SHA-256 of ``(prompt, model, prompt_type)``.
         """
-        effective_max = max_tokens or self._max_tokens
-        key = _cache_key(prompt, self._model, self._temperature, effective_max)
+        key = _cache_key(prompt, self._model, prompt_type)
         cached = self._cache.get(key)
         if cached is not None:
             logger.debug("Cache hit  model=%s key=%.8s", self._model, key)
             return cached
-        response = self._complete_with_retry(prompt, effective_max)
+        response = self._complete_with_retry(prompt)
         self._cache.set(key, response)
         return response
 
@@ -106,10 +104,10 @@ class LLMClient(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def _call_api(self, prompt: str, max_tokens: int | None = None) -> str:
+    def _call_api(self, prompt: str) -> str:
         """Make a single model call and return the response text."""
 
-    def _complete_with_retry(self, prompt: str, max_tokens: int | None = None) -> str:
+    def _complete_with_retry(self, prompt: str) -> str:
         """Call :meth:`_call_api` with proactive throttling and exponential backoff.
 
         Thread-safe: multiple threads share the rate limit via slot reservation.
@@ -123,10 +121,9 @@ class LLMClient(ABC):
                 self._last_call_time = now + wait
         if wait:
             time.sleep(wait)
-        effective_max = max_tokens or self._max_tokens
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                return self._call_api(prompt, effective_max)
+                return self._call_api(prompt)
             except Exception as exc:
                 status = getattr(exc, "status_code", None)
                 if not isinstance(status, int) or status not in {429, 500, 502, 503, 529}:
@@ -166,9 +163,8 @@ class HuggingFaceClient(LLMClient):
         model: str = "Qwen/Qwen2.5-1.5B-Instruct",
         temperature: float = 0.0,
         cache_dir: str | os.PathLike = ".cache/llm_responses",
-        max_tokens: int = 256,
     ) -> None:
-        super().__init__(model=model, temperature=temperature, cache_dir=cache_dir, max_tokens=max_tokens)
+        super().__init__(model=model, temperature=temperature, cache_dir=cache_dir)
         self._device = _get_device()
         self._hf_model = None
         self._tokenizer = None
@@ -200,13 +196,13 @@ class HuggingFaceClient(LLMClient):
             gc.collect()
         super().close()
 
-    def _call_api(self, prompt: str, max_tokens: int | None = None) -> str:
+    def _call_api(self, prompt: str) -> str:
         with self._inference_lock:
             if self._hf_model is None:
                 self._load_model()
-            return self._generate(prompt, max_tokens)
+            return self._generate(prompt)
 
-    def _generate(self, prompt: str, max_tokens: int | None = None) -> str:
+    def _generate(self, prompt: str) -> str:
         messages = [{"role": "user", "content": prompt}]
         input_text = self._tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
@@ -217,7 +213,7 @@ class HuggingFaceClient(LLMClient):
         input_length = inputs["input_ids"].shape[1]
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
         gen_kwargs: dict = {
-            "max_new_tokens": max_tokens or self._max_tokens,
+            "max_new_tokens": _MAX_NEW_TOKENS,
             "pad_token_id": self._tokenizer.eos_token_id,
         }
         if self._temperature > 0:
@@ -236,7 +232,7 @@ class HuggingFaceClient(LLMClient):
 # ---------------------------------------------------------------------------
 
 
-def _cache_key(prompt: str, model: str, temperature: float, max_tokens: int) -> str:
-    """SHA-256 of the ``(prompt, model, temperature, max_tokens)`` tuple."""
-    raw = f"{prompt}\x00{model}\x00{temperature}\x00{max_tokens}"
+def _cache_key(prompt: str, model: str, prompt_type: str) -> str:
+    """SHA-256 of the ``(prompt, model, prompt_type)`` tuple."""
+    raw = f"{prompt}\x00{model}\x00{prompt_type}"
     return hashlib.sha256(raw.encode()).hexdigest()
