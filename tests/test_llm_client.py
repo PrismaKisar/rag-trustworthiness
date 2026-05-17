@@ -3,7 +3,7 @@
 Assertions:
 - complete() returns the model response text (new tokens only, not input).
 - Second call with same prompt is served from cache (model not called again).
-- Cache key is sensitive to model, temperature, and max_tokens.
+- Cache key is sensitive to model and prompt_type.
 - Greedy decoding when temperature == 0; sampling when temperature > 0.
 - truncation=True is always passed to the tokenizer.
 - pad_token_id is set to eos_token_id when missing.
@@ -31,7 +31,6 @@ def _make_client(
     tmp_path,
     model: str = "Qwen/Qwen2.5-1.5B-Instruct",
     temperature: float = 0.0,
-    max_tokens: int = 64,
 ) -> tuple[HuggingFaceClient, MagicMock, MagicMock]:
     """Instantiate HuggingFaceClient with mocked tokenizer and causal model."""
     with (
@@ -52,7 +51,6 @@ def _make_client(
             model=model,
             temperature=temperature,
             cache_dir=tmp_path / "llm",
-            max_tokens=max_tokens,
         )
 
     client._tokenizer = mock_tokenizer
@@ -228,12 +226,13 @@ class TestHuggingFaceClientGenerationParams:
         tok_call_kwargs = tok.call_args[1]
         assert tok_call_kwargs.get("truncation") is True
 
-    def test_max_tokens_passed_to_generate(self, tmp_path):
-        client, tok, mdl = _make_client(tmp_path, max_tokens=64)
+    def test_max_new_tokens_is_positive_int(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
         _setup_generate(tok, mdl, "SUPPORTS")
         client.complete("prompt")
         gen_kwargs = mdl.generate.call_args[1]
-        assert gen_kwargs.get("max_new_tokens") == 64
+        assert isinstance(gen_kwargs.get("max_new_tokens"), int)
+        assert gen_kwargs["max_new_tokens"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -243,19 +242,16 @@ class TestHuggingFaceClientGenerationParams:
 
 class TestCacheKey:
     def test_deterministic(self):
-        assert _cache_key("p", "m", 0.0, 64) == _cache_key("p", "m", 0.0, 64)
+        assert _cache_key("p", "m", "standard") == _cache_key("p", "m", "standard")
 
     def test_sensitive_to_model(self):
-        assert _cache_key("p", "model-a", 0.0, 64) != _cache_key("p", "model-b", 0.0, 64)
-
-    def test_sensitive_to_temperature(self):
-        assert _cache_key("p", "m", 0.0, 64) != _cache_key("p", "m", 0.7, 64)
+        assert _cache_key("p", "model-a", "standard") != _cache_key("p", "model-b", "standard")
 
     def test_sensitive_to_prompt(self):
-        assert _cache_key("prompt-1", "m", 0.0, 64) != _cache_key("prompt-2", "m", 0.0, 64)
+        assert _cache_key("prompt-1", "m", "standard") != _cache_key("prompt-2", "m", "standard")
 
-    def test_sensitive_to_max_tokens(self):
-        assert _cache_key("p", "m", 0.0, 64) != _cache_key("p", "m", 0.0, 256)
+    def test_sensitive_to_prompt_type(self):
+        assert _cache_key("p", "m", "standard") != _cache_key("p", "m", "chain_of_thought")
 
 
 # ---------------------------------------------------------------------------
@@ -264,51 +260,26 @@ class TestCacheKey:
 
 
 class TestLLMClientBase:
-    """Any minimal subclass must work without re-declaring _max_tokens."""
+    """Minimal subclass smoke tests."""
 
-    def _minimal_client(self, tmp_path, max_tokens=256):
+    def _minimal_client(self, tmp_path):
         from src.generation.llm_client import LLMClient
 
         class MinimalClient(LLMClient):
-            def _call_api(self, prompt: str, max_tokens=None) -> str:
+            def _call_api(self, prompt: str) -> str:
                 return "ok"
 
-        return MinimalClient(model="test-model", cache_dir=tmp_path / "llm", max_tokens=max_tokens)
+        return MinimalClient(model="test-model", cache_dir=tmp_path / "llm")
 
-    def test_complete_without_explicit_max_tokens_does_not_raise(self, tmp_path):
-        """complete() must not raise AttributeError when max_tokens is omitted."""
+    def test_complete_without_prompt_type_does_not_raise(self, tmp_path):
+        """complete() must not raise when prompt_type is omitted (uses default)."""
         client = self._minimal_client(tmp_path)
         assert client.complete("hello") == "ok"
 
-    def test_base_default_max_tokens_respected(self, tmp_path):
-        """The max_tokens passed to __init__ must propagate to _call_api."""
-        from src.generation.llm_client import LLMClient
-
-        received: list[int] = []
-
-        class CapturingClient(LLMClient):
-            def _call_api(self, prompt: str, max_tokens=None) -> str:
-                received.append(max_tokens)
-                return "ok"
-
-        client = CapturingClient(model="m", cache_dir=tmp_path / "llm", max_tokens=128)
-        client.complete("hello")
-        assert received == [128]
-
-    def test_explicit_max_tokens_overrides_default(self, tmp_path):
-        """max_tokens passed to complete() must win over the instance default."""
-        from src.generation.llm_client import LLMClient
-
-        received: list[int] = []
-
-        class CapturingClient(LLMClient):
-            def _call_api(self, prompt: str, max_tokens=None) -> str:
-                received.append(max_tokens)
-                return "ok"
-
-        client = CapturingClient(model="m", cache_dir=tmp_path / "llm", max_tokens=64)
-        client.complete("hello", max_tokens=512)
-        assert received == [512]
+    def test_complete_with_prompt_type_does_not_raise(self, tmp_path):
+        """complete() must accept an explicit prompt_type."""
+        client = self._minimal_client(tmp_path)
+        assert client.complete("hello", "chain_of_thought") == "ok"
 
 
 # ---------------------------------------------------------------------------
