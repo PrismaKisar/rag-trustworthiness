@@ -1,4 +1,4 @@
-"""Tests for src/generation/parser.py — extract_label()."""
+"""Tests for src/generation/parser.py - extract_label()."""
 
 import pytest
 
@@ -48,7 +48,7 @@ class TestKeywordFallback:
         assert extract_label("There is not enough info to decide.") == "NOT ENOUGH INFO"
 
     def test_not_enough_info_takes_priority_over_supports(self):
-        # Both keywords present — NOT ENOUGH INFO must win (checked first).
+        # Both keywords present - NOT ENOUGH INFO must win (checked first).
         assert extract_label("supports the claim but not enough info") == "NOT ENOUGH INFO"
 
 
@@ -65,7 +65,7 @@ class TestDefault:
 
 
 # ---------------------------------------------------------------------------
-# extract_answer — HotpotQA QA output
+# extract_answer - HotpotQA QA output
 # ---------------------------------------------------------------------------
 
 
@@ -108,7 +108,7 @@ class TestExtractAnswer:
 
 
 # ---------------------------------------------------------------------------
-# extract_contradiction_flag — vigilant prompt consistency check
+# extract_contradiction_flag - vigilant prompt consistency check
 # ---------------------------------------------------------------------------
 
 class TestExtractContradictionFlag:

@@ -1,4 +1,4 @@
-"""Tests for src/evaluation/pipeline.py — EvaluationTask Protocol + run_pipeline composer."""
+"""Tests for src/evaluation/pipeline.py - EvaluationTask Protocol + run_pipeline composer."""
 
 from __future__ import annotations
 

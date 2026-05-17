@@ -1,4 +1,4 @@
-"""Tests for src/evaluation/dispatch.py — shared parallel LLM dispatch."""
+"""Tests for src/evaluation/dispatch.py - shared parallel LLM dispatch."""
 
 from unittest.mock import MagicMock
 
@@ -19,7 +19,7 @@ def _llm(response="raw response"):
 
 
 # ---------------------------------------------------------------------------
-# Cycle 1 — single case, single prompt
+# Cycle 1 - single case, single prompt
 # ---------------------------------------------------------------------------
 
 
@@ -37,7 +37,7 @@ class TestSingleCaseSinglePrompt:
 
 
 # ---------------------------------------------------------------------------
-# Cycle 2 — multiple cases, responses in case order
+# Cycle 2 - multiple cases, responses in case order
 # ---------------------------------------------------------------------------
 
 
@@ -59,7 +59,7 @@ class TestMultipleCases:
 
 
 # ---------------------------------------------------------------------------
-# Cycle 3 — multiple prompts per case (self-consistency), prompt order
+# Cycle 3 - multiple prompts per case (self-consistency), prompt order
 # ---------------------------------------------------------------------------
 
 
@@ -88,7 +88,7 @@ class TestMultiplePromptsPerCase:
 
 
 # ---------------------------------------------------------------------------
-# Cycle 4 — empty cases
+# Cycle 4 - empty cases
 # ---------------------------------------------------------------------------
 
 
@@ -104,7 +104,7 @@ class TestEmptyCases:
 
 
 # ---------------------------------------------------------------------------
-# Cycle 5 — LLM call count
+# Cycle 5 - LLM call count
 # ---------------------------------------------------------------------------
 
 

@@ -5,10 +5,10 @@ Usage (from project root):
     .venv/bin/python -m src.data.download_hotpotqa
 
 Skips the network call when the target jsonl already exists. The upstream URL
-serves a single JSON array — we stream it once and rewrite each example as a
+serves a single JSON array - we stream it once and rewrite each example as a
 separate jsonl line so the rest of the pipeline can read it like FEVER.
 
-Attribution: Yang et al. 2018 — HotpotQA dataset; URL from the official
+Attribution: Yang et al. 2018 - HotpotQA dataset; URL from the official
 release at https://hotpotqa.github.io/.
 """
 
@@ -42,7 +42,7 @@ def download(target: Path = DEFAULT_TARGET, url: str = DEFAULT_URL) -> Path:
     """
     target = Path(target)
     if target.exists():
-        logger.info("HotpotQA dev already present at %s — skipping.", target)
+        logger.info("HotpotQA dev already present at %s - skipping.", target)
         return target
 
     target.parent.mkdir(parents=True, exist_ok=True)

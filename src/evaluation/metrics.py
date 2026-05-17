@@ -1,9 +1,9 @@
 """Evaluation metrics for RAG fact-verification experiments.
 
 Metrics defined in "the pipeline.md" §5, grounded in:
-- Zhou et al. 2024 — Factuality dimension: accuracy, hallucination rate
-- Wang et al. 2022 (via Zhou 2024 §2.1) — self-consistency as output stability
-- Lewis et al. 2020 — retrieval precision@k
+- Zhou et al. 2024 - Factuality dimension: accuracy, hallucination rate
+- Wang et al. 2022 (via Zhou 2024 §2.1) - self-consistency as output stability
+
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def token_f1(prediction: str, gold: str) -> float:
 def accuracy(predictions: list[str], gold_labels: list[str]) -> float:
     """Fraction of predictions matching the gold label.
 
-    Attribution: Zhou et al. 2024 — Factuality dimension.
+    Attribution: Zhou et al. 2024 - Factuality dimension.
     """
     if not predictions:
         return 0.0
@@ -68,7 +68,7 @@ def macro_f1(predictions: list[str], gold_labels: list[str]) -> float:
     """Macro-averaged F1 over SUPPORTS / REFUTES / NOT ENOUGH INFO.
 
     Complements accuracy by handling label imbalance (SUPPORTS dominates).
-    Attribution: Zhou et al. 2024 — Factuality dimension.
+    Attribution: Zhou et al. 2024 - Factuality dimension.
     """
     if not predictions:
         return 0.0
@@ -88,7 +88,7 @@ def hallucination_rate(predictions: list[str], gold_labels: list[str]) -> float:
     """Fraction of confident predictions (SUPPORTS/REFUTES) when gold == NOT ENOUGH INFO.
 
     Operationalises "asserting facts not grounded in retrieved evidence".
-    Attribution: Zhou et al. 2024 — Factuality / hallucination quantification.
+    Attribution: Zhou et al. 2024 - Factuality / hallucination quantification.
     """
     nei_indices = [i for i, g in enumerate(gold_labels) if g == "NOT ENOUGH INFO"]
     if not nei_indices:
@@ -109,7 +109,7 @@ def self_consistency(runs_per_claim: list[list[str]]) -> float:
     Returns:
         Float in [0, 1]. 1.0 = all claims perfectly consistent.
 
-    Attribution: Wang et al. 2022 (cited in Zhou 2024 §2.1) — operationalised as
+    Attribution: Wang et al. 2022 (cited in Zhou 2024 §2.1) - operationalised as
     output stability under passage-order perturbation.
     """
     if not runs_per_claim:
@@ -123,20 +123,22 @@ def self_consistency(runs_per_claim: list[list[str]]) -> float:
     return sum(scores) / len(scores) if scores else 0.0
 
 
-def precision_at_k(retrieved: list[str], gold: list[str]) -> float:
-    """Fraction of retrieved passages that are gold evidence.
+def recall_at_k(retrieved: list[str], gold: list[str]) -> float:
+    """Fraction of gold passages recovered in the top-k retrieved passages.
 
     Args:
         retrieved: Top-K passages returned by the retriever.
         gold:      Ground-truth evidence passages for the claim.
 
     Returns:
-        Float in [0, 1]. Used in notebook 02 (retrieval sweep).
+        Float in [0, 1]. Comparable across claims with different numbers of
+        gold passages (unlike precision@k, whose upper bound depends on |gold|).
+        Capped at 1.0 when more gold passages exist than retrieved slots.
     """
-    if not retrieved:
+    if not retrieved or not gold:
         return 0.0
     gold_set = set(gold)
-    return sum(1 for p in retrieved if p in gold_set) / len(retrieved)
+    return sum(1 for p in retrieved if p in gold_set) / len(gold)
 
 
 def qa_hallucination_rate(
@@ -147,7 +149,7 @@ def qa_hallucination_rate(
 
     Operationalises grounding failure: an answer not supported by any token
     in the retrieved evidence is considered hallucinated (generated from
-    parametric memory alone). Attribution: inspired by Lewis et al. 2020 —
+    parametric memory alone). Attribution: inspired by Lewis et al. 2020 -
     RAG reduces hallucination by grounding answers in retrieved passages.
     """
     if not predicted_answers:
@@ -175,14 +177,14 @@ def contradiction_detection_rate(flags: list[bool]) -> float:
 
 
 def retrieval_accuracy_correlation(
-    precision_vals: list[float],
+    recall_vals: list[float],
     accuracy_vals: list[float],
 ) -> dict[str, float]:
-    """Pearson and Spearman correlation between precision@k and accuracy.
+    """Pearson and Spearman correlation between recall@k and accuracy.
 
     Args:
-        precision_vals: Per-condition precision@k values.
-        accuracy_vals:  Corresponding accuracy values.
+        recall_vals:   Per-condition recall@k values.
+        accuracy_vals: Corresponding accuracy values.
 
     Returns:
         Dict with keys ``pearson_r``, ``pearson_p``, ``spearman_r``, ``spearman_p``.
@@ -191,10 +193,10 @@ def retrieval_accuracy_correlation(
     nan = float("nan")
     _nan_result = {"pearson_r": nan, "pearson_p": nan, "spearman_r": nan, "spearman_p": nan}
 
-    if len(precision_vals) < 2 or len(accuracy_vals) < 2:
+    if len(recall_vals) < 2 or len(accuracy_vals) < 2:
         return _nan_result
 
-    pr, sp = stats.pearsonr(precision_vals, accuracy_vals), stats.spearmanr(precision_vals, accuracy_vals)
+    pr, sp = stats.pearsonr(recall_vals, accuracy_vals), stats.spearmanr(recall_vals, accuracy_vals)
     return {
         "pearson_r":  float(pr.statistic),
         "pearson_p":  float(pr.pvalue),

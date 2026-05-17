@@ -1,4 +1,4 @@
-"""Tests for src/retrieval/embedder.py — no real model download required.
+"""Tests for src/retrieval/embedder.py - no real model download required.
 
 The SentenceTransformer model is mocked so tests run offline and fast.
 """

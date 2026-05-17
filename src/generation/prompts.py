@@ -7,9 +7,9 @@ Six variants across two tasks:
 All six are accessible via the single ``format_prompt`` entry point.
 
 Attribution:
-    Standard prompt format — Singal et al. 2024 §4, Figure 5.
-    Chain-of-thought prompting — Zhou et al. 2024 §2.1 (citing Wei et al. 2022).
-    Vigilant prompting as poisoning defence — Zhou et al. 2024 §2.1 / §3.
+    Standard prompt format - Singal et al. 2024 §4, Figure 5.
+    Chain-of-thought prompting - Zhou et al. 2024 §2.1 (citing Wei et al. 2022).
+    Vigilant prompting as poisoning defence - Zhou et al. 2024 §2.1 / §3.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ Final Label (SUPPORTS / REFUTES / NOT ENOUGH INFO):"""
 
 _STANDARD_QA = """\
 You are answering a question using only the given passages. Reply with the \
-shortest possible answer (a name, entity, or short phrase) — no explanation.
+shortest possible answer (a name, entity, or short phrase) - no explanation.
 
 Question: {question}
 Passages:

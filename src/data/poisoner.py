@@ -4,7 +4,7 @@ Two strategies are supported, selected via the ``strategy`` argument:
 
 - ``opposite_label`` (Strategy A): sample distractor passages from evidence
   of claims with the *opposite* gold label. Deterministic given ``seed``.
-  Cheap but weak — distractors rarely directly contradict the target claim.
+  Cheap but weak - distractors rarely directly contradict the target claim.
 
   Label mapping used:
     SUPPORTS        → pool from REFUTES examples
@@ -13,11 +13,11 @@ Two strategies are supported, selected via the ``strategy`` argument:
 
 - ``llm_negation`` (Strategy B): generate a direct contradiction of each gold
   evidence passage via an LLM. Targeted adversarial passages, semantically
-  close to the original — more realistic as misinformation. Generations are
+  close to the original - more realistic as misinformation. Generations are
   cached by the LLM client, so re-runs are free.
 
 Attribution: knowledge-poisoning attack design inspired by Zhou et al. 2024
-(Robustness dimension, §2.1 — adversarial corpus injection).
+(Robustness dimension, §2.1 - adversarial corpus injection).
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ _NEGATION_PROMPT = """\
 Rewrite the following statement so that its meaning is reversed: the new \
 statement must directly contradict the original while remaining a single \
 fluent sentence about the same subject. Do not add explanations, quotes, or \
-prefaces — output only the rewritten statement.
+prefaces - output only the rewritten statement.
 
 Statement: {passage}
 
@@ -71,7 +71,7 @@ def poison_dataset(
     """Return a new list with evidence poisoned at rate ``poison_rate``.
 
     Args:
-        examples: Output of ``fever_loader.load_fever`` — each dict has keys
+        examples: Output of ``fever_loader.load_fever`` - each dict has keys
                   ``claim`` (str), ``evidence`` (list[str]), ``label`` (str).
         poison_rate: Expected fraction of evidence passages to replace; must be in
                      [0, 1]. Each passage is selected independently via a Bernoulli
@@ -79,8 +79,8 @@ def poison_dataset(
                      stochastic for intermediate rates (0 < rate < 1) and exact only
                      at the boundaries (0 → none replaced, 1 → all replaced).
         seed: Random seed for reproducibility.
-        strategy: ``"opposite_label"`` (Strategy A — sample distractors from
-                  opposite-label evidence) or ``"llm_negation"`` (Strategy B —
+        strategy: ``"opposite_label"`` (Strategy A - sample distractors from
+                  opposite-label evidence) or ``"llm_negation"`` (Strategy B -
                   LLM-generated direct contradictions).
 
     Returns:
@@ -119,7 +119,7 @@ def poison_dataset(
             })
             if not candidates:
                 logger.warning(
-                    "No distractor candidates for label '%s' — skipping poisoning.",
+                    "No distractor candidates for label '%s' - skipping poisoning.",
                     ex["label"],
                 )
                 poisoned.append(ex_copy)
@@ -129,7 +129,7 @@ def poison_dataset(
             else:
                 logger.warning(
                     "Distractor pool (%d) smaller than n_poison (%d) "
-                    "— sampling with replacement.",
+                    "- sampling with replacement.",
                     len(candidates), n_poison,
                 )
                 distractors = rng.choices(candidates, k=n_poison)

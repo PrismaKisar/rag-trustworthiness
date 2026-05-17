@@ -1,4 +1,4 @@
-"""Tests for src/data/hotpotqa_loader.py — no real HotpotQA data required."""
+"""Tests for src/data/hotpotqa_loader.py - no real HotpotQA data required."""
 
 import json
 from pathlib import Path

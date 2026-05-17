@@ -1,4 +1,4 @@
-"""Tests for src/evaluation/metrics.py — all five metric functions."""
+"""Tests for src/evaluation/metrics.py - all five metric functions."""
 
 import pytest
 
@@ -152,7 +152,7 @@ class TestPrecisionAtK:
 
 
 # ---------------------------------------------------------------------------
-# exact_match (QA — HotpotQA)
+# exact_match (QA - HotpotQA)
 # ---------------------------------------------------------------------------
 
 
@@ -183,7 +183,7 @@ class TestExactMatch:
 
 
 # ---------------------------------------------------------------------------
-# token_f1 (QA — HotpotQA)
+# token_f1 (QA - HotpotQA)
 # ---------------------------------------------------------------------------
 
 

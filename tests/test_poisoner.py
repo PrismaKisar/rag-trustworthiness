@@ -1,4 +1,4 @@
-"""Tests for src/data/poisoner.py — no real FEVER data required."""
+"""Tests for src/data/poisoner.py - no real FEVER data required."""
 
 import copy
 
@@ -23,7 +23,7 @@ EXAMPLES = [
 
 
 # ---------------------------------------------------------------------------
-# Tests — basic invariants
+# Tests - basic invariants
 # ---------------------------------------------------------------------------
 
 
@@ -52,7 +52,7 @@ def test_originals_not_mutated():
 
 
 # ---------------------------------------------------------------------------
-# Tests — poisoning rate
+# Tests - poisoning rate
 # ---------------------------------------------------------------------------
 
 
@@ -78,7 +78,7 @@ def test_poisoning_rate_per_example(rate):
 
 
 # ---------------------------------------------------------------------------
-# Tests — distractors come from opposite label
+# Tests - distractors come from opposite label
 # ---------------------------------------------------------------------------
 
 
@@ -105,7 +105,7 @@ def test_distractors_from_opposite_label_refutes():
 
 
 # ---------------------------------------------------------------------------
-# Tests — reproducibility
+# Tests - reproducibility
 # ---------------------------------------------------------------------------
 
 
@@ -124,7 +124,7 @@ def test_different_seeds_produce_different_output():
 
 
 # ---------------------------------------------------------------------------
-# Tests — edge cases
+# Tests - edge cases
 # ---------------------------------------------------------------------------
 
 
@@ -164,7 +164,7 @@ def test_no_poisoned_positions_at_rate_zero():
 
 
 # ---------------------------------------------------------------------------
-# Tests — strategy parameter
+# Tests - strategy parameter
 # ---------------------------------------------------------------------------
 
 

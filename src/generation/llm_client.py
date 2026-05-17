@@ -8,8 +8,8 @@ near-free.
 Attribution:
     Multi-model comparison motivated by Zhou et al. 2024 §4, which benchmarks
     multiple LLMs across trustworthiness dimensions.
-    RAG + LLM pipeline shape for veracity prediction — Singal et al. 2024 §4.
-    Cost-bounded experimentation via response caching — Zhou et al. 2024 §2.1.
+    RAG + LLM pipeline shape for veracity prediction - Singal et al. 2024 §4.
+    Cost-bounded experimentation via response caching - Zhou et al. 2024 §2.1.
 """
 
 from __future__ import annotations

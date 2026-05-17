@@ -1,4 +1,4 @@
-"""Tests for src/data/download_hotpotqa.py — no network access."""
+"""Tests for src/data/download_hotpotqa.py - no network access."""
 
 import json
 from pathlib import Path

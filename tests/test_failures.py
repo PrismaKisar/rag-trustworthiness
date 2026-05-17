@@ -64,7 +64,7 @@ class TestClassifyFailure:
         assert classify_failure(case, result) != "nei_collapse"
 
     def test_nei_collapse_requires_factual_gold(self):
-        # Gold is already NEI — predicting NEI is correct, not a collapse
+        # Gold is already NEI - predicting NEI is correct, not a collapse
         case = _case(
             gold_label="NOT ENOUGH INFO",
             passages=["d1", "d2", "d3"],

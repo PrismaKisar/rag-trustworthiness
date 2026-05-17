@@ -77,7 +77,7 @@ class TestRetrieverReturnsExactlyK:
 
 
 class TestPrecisionAtK:
-    """precision@k = |retrieved ∩ gold| / k — must be computable from corpus."""
+    """precision@k = |retrieved ∩ gold| / k - must be computable from corpus."""
 
     def _precision_at_k(self, retrieved: list[str], corpus: RetrievalCorpus) -> float:
         gold_passages = {corpus.passages[i] for i in corpus.gold_indices}

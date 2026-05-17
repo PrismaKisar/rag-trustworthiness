@@ -5,9 +5,9 @@ Both dev.jsonl and train.jsonl already contain evidence as lists of strings
 No wiki-pages dereference is needed.
 
 Evidence format per claim:
-    evidence: list[str]  — sentence strings, empty for NOT ENOUGH INFO
+    evidence: list[str]  - sentence strings, empty for NOT ENOUGH INFO
 
-Attribution: Thorne et al., 2018 — FEVER dataset.
+Attribution: Thorne et al., 2018 - FEVER dataset.
 """
 
 from __future__ import annotations
