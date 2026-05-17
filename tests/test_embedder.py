@@ -9,7 +9,30 @@ import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
 
-from src.retrieval.embedder import Embedder  # import at module level so patch target exists
+from src.retrieval.embedder import Embedder, _best_device
+
+
+# ---------------------------------------------------------------------------
+# Device auto-detection
+# ---------------------------------------------------------------------------
+
+
+def test_best_device_prefers_cuda():
+    with patch("torch.cuda.is_available", return_value=True), \
+         patch("torch.backends.mps.is_available", return_value=True):
+        assert _best_device() == "cuda"
+
+
+def test_best_device_falls_back_to_mps():
+    with patch("torch.cuda.is_available", return_value=False), \
+         patch("torch.backends.mps.is_available", return_value=True):
+        assert _best_device() == "mps"
+
+
+def test_best_device_falls_back_to_cpu():
+    with patch("torch.cuda.is_available", return_value=False), \
+         patch("torch.backends.mps.is_available", return_value=False):
+        assert _best_device() == "cpu"
 
 
 # ---------------------------------------------------------------------------
@@ -23,7 +46,7 @@ _TEXTS = ["Alice lives in Wonderland.", "Bob never left Paris.", "Carol is unkno
 def _make_fake_model(dim: int = _DIM) -> MagicMock:
     """Return a mock SentenceTransformer that produces deterministic vectors."""
     model = MagicMock()
-    model.get_sentence_embedding_dimension.return_value = dim
+    model.get_embedding_dimension.return_value = dim
 
     def _encode(texts, **kwargs):
         rng = np.random.default_rng(seed=hash(tuple(texts)) % (2**31))
