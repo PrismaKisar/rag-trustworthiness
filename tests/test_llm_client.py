@@ -12,7 +12,7 @@ Assertions:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 import torch
@@ -309,3 +309,66 @@ class TestLLMClientBase:
         client = CapturingClient(model="m", cache_dir=tmp_path / "llm", max_tokens=64)
         client.complete("hello", max_tokens=512)
         assert received == [512]
+
+
+# ---------------------------------------------------------------------------
+# HuggingFaceClient — close() / memory cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestHuggingFaceClientClose:
+    """close() must release model references and trigger gc.collect()."""
+
+    def _make_loaded_client(self, tmp_path, device: str = "cpu") -> HuggingFaceClient:
+        client, _, _ = _make_client(tmp_path)
+        client._device = device
+        return client
+
+    def test_close_sets_model_and_tokenizer_to_none(self, tmp_path):
+        client = self._make_loaded_client(tmp_path)
+        assert client._hf_model is not None
+        client.close()
+        assert client._hf_model is None
+        assert client._tokenizer is None
+
+    def test_close_calls_gc_collect(self, tmp_path):
+        client = self._make_loaded_client(tmp_path)
+        with patch("src.generation.llm_client.gc") as mock_gc:
+            client.close()
+        mock_gc.collect.assert_called_once()
+
+    def test_close_mps_synchronizes_before_empty_cache(self, tmp_path):
+        client = self._make_loaded_client(tmp_path, device="mps")
+        call_order: list[str] = []
+        with (
+            patch("torch.mps.synchronize", side_effect=lambda: call_order.append("sync")),
+            patch("torch.mps.empty_cache", side_effect=lambda: call_order.append("empty")),
+            patch("src.generation.llm_client.gc"),
+        ):
+            client.close()
+        assert call_order == ["sync", "empty"], "synchronize must precede empty_cache on MPS"
+
+    def test_close_cuda_synchronizes_before_empty_cache(self, tmp_path):
+        client = self._make_loaded_client(tmp_path, device="cuda")
+        call_order: list[str] = []
+        with (
+            patch("torch.cuda.synchronize", side_effect=lambda: call_order.append("sync")),
+            patch("torch.cuda.empty_cache", side_effect=lambda: call_order.append("empty")),
+            patch("src.generation.llm_client.gc"),
+        ):
+            client.close()
+        assert call_order == ["sync", "empty"], "synchronize must precede empty_cache on CUDA"
+
+    def test_close_idempotent(self, tmp_path):
+        """Calling close() twice must not raise."""
+        client = self._make_loaded_client(tmp_path)
+        with patch("src.generation.llm_client.gc"):
+            client.close()
+            client.close()  # second call must be a no-op, not an error
+
+    def test_context_manager_triggers_close(self, tmp_path):
+        client, _, _ = _make_client(tmp_path)
+        with patch.object(client, "close") as mock_close:
+            with client:
+                pass
+        mock_close.assert_called_once()

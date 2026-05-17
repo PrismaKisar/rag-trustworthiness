@@ -14,6 +14,7 @@ Attribution:
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import logging
 import os
@@ -191,9 +192,12 @@ class HuggingFaceClient(LLMClient):
             self._hf_model = None
             self._tokenizer = None
             if self._device == "mps":
+                torch.mps.synchronize()
                 torch.mps.empty_cache()
             elif self._device == "cuda":
+                torch.cuda.synchronize()
                 torch.cuda.empty_cache()
+            gc.collect()
         super().close()
 
     def _call_api(self, prompt: str, max_tokens: int | None = None) -> str:
