@@ -200,7 +200,7 @@ class TestAggregate:
         from src.evaluation import qa_scorer
         cases, results = self._make_pair(["Warsaw"], ["Warsaw"])
         out = qa_scorer.aggregate(cases, results)
-        assert {"exact_match", "token_f1", "precision_at_k"} <= out.keys()
+        assert {"exact_match", "token_f1", "recall_at_k"} <= out.keys()
 
     def test_perfect_em(self):
         from src.evaluation import qa_scorer
@@ -220,7 +220,7 @@ class TestAggregate:
         out = qa_scorer.aggregate(cases, results)
         assert out["token_f1"] == pytest.approx(1.0)
 
-    def test_precision_at_k_perfect(self):
+    def test_recall_at_k_perfect(self):
         from src.evaluation import qa_scorer
         cases, results = self._make_pair(
             ["Warsaw"], ["Warsaw"],
@@ -228,7 +228,7 @@ class TestAggregate:
             retrieved=[["g1", "g2"]],
         )
         out = qa_scorer.aggregate(cases, results)
-        assert out["precision_at_k"] == pytest.approx(1.0)
+        assert out["recall_at_k"] == pytest.approx(1.0)
 
     def test_no_self_consistency_for_single_run(self):
         from src.evaluation import qa_scorer
@@ -279,6 +279,6 @@ class TestRunComposer:
             prompt_type="standard_qa",
             max_tokens_by_prompt=_MAX_TOKENS,
         )
-        assert {"exact_match", "token_f1", "precision_at_k"} <= out.keys()
+        assert {"exact_match", "token_f1", "recall_at_k"} <= out.keys()
         for v in out.values():
             assert 0.0 <= v <= 1.0

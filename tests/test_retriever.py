@@ -76,24 +76,24 @@ class TestRetrieverReturnsExactlyK:
         assert all(p in PASSAGES for p in results)
 
 
-class TestPrecisionAtK:
-    """precision@k = |retrieved ∩ gold| / k - must be computable from corpus."""
+class TestRecallAtK:
+    """recall@k = |retrieved ∩ gold| / |gold| - must be computable from corpus."""
 
-    def _precision_at_k(self, retrieved: list[str], corpus: RetrievalCorpus) -> float:
+    def _recall_at_k(self, retrieved: list[str], corpus: RetrievalCorpus) -> float:
         gold_passages = {corpus.passages[i] for i in corpus.gold_indices}
         hits = sum(1 for p in retrieved if p in gold_passages)
-        return hits / len(retrieved) if retrieved else 0.0
+        return hits / len(gold_passages) if gold_passages else 0.0
 
-    def test_precision_at_k_in_range(self, built_retriever, corpus):
+    def test_recall_at_k_in_range(self, built_retriever, corpus):
         results = built_retriever.retrieve("Paris Eiffel Tower", k=3)
-        p_at_k = self._precision_at_k(results, corpus)
-        assert 0.0 <= p_at_k <= 1.0
+        r_at_k = self._recall_at_k(results, corpus)
+        assert 0.0 <= r_at_k <= 1.0
 
-    def test_precision_at_k_relevant_query(self, built_retriever, corpus):
+    def test_recall_at_k_relevant_query(self, built_retriever, corpus):
         """A query about Paris/Eiffel should surface gold passages."""
         results = built_retriever.retrieve("Paris Eiffel Tower capital France", k=2)
-        p_at_k = self._precision_at_k(results, corpus)
-        assert p_at_k > 0.0, "Expected at least one gold passage in top-2 for a Paris query"
+        r_at_k = self._recall_at_k(results, corpus)
+        assert r_at_k > 0.0, "Expected at least one gold passage in top-2 for a Paris query"
 
 
 class TestRetrieveBuildGuard:

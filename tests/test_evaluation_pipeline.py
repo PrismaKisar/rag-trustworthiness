@@ -139,7 +139,7 @@ class TestFeverTaskIntegration:
             retriever=retriever,
             llm=llm,
         )
-        assert {"accuracy", "macro_f1", "hallucination_rate", "precision_at_k"} <= metrics.keys()
+        assert {"accuracy", "macro_f1", "hallucination_rate", "recall_at_k"} <= metrics.keys()
         for val in metrics.values():
             assert 0.0 <= val <= 1.0
 
@@ -187,6 +187,6 @@ class TestHotpotQATaskIntegration:
             llm=llm,
             prompt_type="standard_qa",
         )
-        assert {"exact_match", "token_f1", "precision_at_k"} <= metrics.keys()
+        assert {"exact_match", "token_f1", "recall_at_k"} <= metrics.keys()
         for val in metrics.values():
             assert 0.0 <= val <= 1.0
