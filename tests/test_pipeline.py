@@ -264,7 +264,7 @@ def test_pipeline_routes_to_hotpotqa(tmp_path):
 
 class _FakeCase:
     prompts = ["prompt_0"]
-    max_tokens = 64
+    prompt_type = "standard"
 
 
 class _TraceTask:

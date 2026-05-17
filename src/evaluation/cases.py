@@ -14,7 +14,7 @@ class EvaluationCase:
     passages: list[str]
     gold_passages: list[str]
     prompts: list[str]
-    max_tokens: int
+    prompt_type: str
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class QACase:
     passages: list[str]
     gold_passages: list[str]
     prompts: list[str]
-    max_tokens: int
+    prompt_type: str
 
 
 @dataclass(frozen=True)

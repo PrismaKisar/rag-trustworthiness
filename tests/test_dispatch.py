@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 from src.evaluation import dispatch
 
 
-def _case(prompts, max_tokens=64):
+def _case(prompts, prompt_type="standard"):
     c = MagicMock()
     c.prompts = prompts
-    c.max_tokens = max_tokens
+    c.prompt_type = prompt_type
     return c
 
 
@@ -115,8 +115,8 @@ class TestLLMCallCount:
         dispatch.resolve_raw(cases, llm)
         assert llm.complete.call_count == 3
 
-    def test_max_tokens_passed_to_llm(self):
-        cases = [_case(["p"], max_tokens=128)]
+    def test_prompt_type_passed_to_llm(self):
+        cases = [_case(["p"], prompt_type="chain_of_thought")]
         llm = _llm()
         dispatch.resolve_raw(cases, llm)
-        llm.complete.assert_called_once_with("p", 128)
+        llm.complete.assert_called_once_with("p", "chain_of_thought")
