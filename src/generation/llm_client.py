@@ -1,9 +1,9 @@
 """LLM client abstraction with disk caching.
 
-Exposes a uniform `.complete(prompt) -> str` interface over local Hugging Face
-causal (decoder-only) instruction-tuned models.  Responses are cached to disk
-keyed on (prompt_hash, model, temperature, max_tokens) so notebook re-runs are
-near-free.
+Exposes a uniform `.complete(prompt, prompt_type) -> str` interface over local
+Hugging Face causal (decoder-only) instruction-tuned models.  Responses are
+cached to disk keyed on (prompt_hash, model, prompt_type) so notebook re-runs
+are near-free.
 
 Attribution:
     Multi-model comparison motivated by Zhou et al. 2024 §4, which benchmarks

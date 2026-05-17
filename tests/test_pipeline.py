@@ -85,7 +85,7 @@ def test_pipeline_returns_valid_metrics(mock_llm, tmp_path):
             "--self_consistency_runs", "1",
         ])
 
-    required_keys = {"accuracy", "macro_f1", "hallucination_rate", "precision_at_k"}
+    required_keys = {"accuracy", "macro_f1", "hallucination_rate", "recall_at_k"}
     assert required_keys.issubset(metrics.keys()), f"Missing keys: {required_keys - metrics.keys()}"
 
     for key in required_keys:
@@ -252,8 +252,8 @@ def test_pipeline_routes_to_hotpotqa(tmp_path):
 
     mock_load.assert_called_once()
     mock_fever_load.assert_not_called()
-    assert {"exact_match", "token_f1", "precision_at_k"} <= metrics.keys()
-    for key in ("exact_match", "token_f1", "precision_at_k"):
+    assert {"exact_match", "token_f1", "recall_at_k"} <= metrics.keys()
+    for key in ("exact_match", "token_f1", "recall_at_k"):
         assert 0.0 <= metrics[key] <= 1.0
 
 

@@ -258,7 +258,7 @@ class TestAggregate:
     def test_returns_required_keys(self):
         cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"])
         out = scorer.aggregate(cases, results)
-        assert {"accuracy", "macro_f1", "hallucination_rate", "precision_at_k"} <= out.keys()
+        assert {"accuracy", "macro_f1", "hallucination_rate", "recall_at_k"} <= out.keys()
 
     def test_perfect_accuracy(self):
         preds = ["SUPPORTS", "REFUTES", "NOT ENOUGH INFO"]
@@ -274,7 +274,7 @@ class TestAggregate:
         out = scorer.aggregate(cases, results)
         assert out["accuracy"] == pytest.approx(0.0)
 
-    def test_precision_at_k_perfect_when_passages_match_gold(self):
+    def test_recall_at_k_perfect_when_passages_match_gold(self):
         cases = [
             EvaluationCase(
                 claim="c", gold_label="SUPPORTS",
@@ -285,9 +285,9 @@ class TestAggregate:
         ]
         results = [EvaluationResult(case_index=0, runs=["SUPPORTS"], predicted_label="SUPPORTS")]
         out = scorer.aggregate(cases, results)
-        assert out["precision_at_k"] == pytest.approx(1.0)
+        assert out["recall_at_k"] == pytest.approx(1.0)
 
-    def test_precision_at_k_zero_when_no_overlap(self):
+    def test_recall_at_k_zero_when_no_overlap(self):
         cases = [
             EvaluationCase(
                 claim="c", gold_label="SUPPORTS",
@@ -298,7 +298,7 @@ class TestAggregate:
         ]
         results = [EvaluationResult(case_index=0, runs=["SUPPORTS"], predicted_label="SUPPORTS")]
         out = scorer.aggregate(cases, results)
-        assert out["precision_at_k"] == pytest.approx(0.0)
+        assert out["recall_at_k"] == pytest.approx(0.0)
 
     def test_no_self_consistency_key_for_single_run(self):
         cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"], sc_runs=1)

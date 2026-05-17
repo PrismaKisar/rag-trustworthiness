@@ -7,7 +7,7 @@ from src.evaluation.metrics import (
     contradiction_detection_rate,
     hallucination_rate,
     macro_f1,
-    precision_at_k,
+    recall_at_k,
     qa_hallucination_rate,
     retrieval_accuracy_correlation,
     self_consistency,
@@ -125,30 +125,32 @@ class TestSelfConsistency:
 
 
 # ---------------------------------------------------------------------------
-# precision_at_k
+# recall_at_k
 # ---------------------------------------------------------------------------
 
-class TestPrecisionAtK:
+class TestRecallAtK:
     def test_all_gold(self):
+        # all gold passages are in retrieved → recall = |gold|/|gold| = 1.0
         retrieved = ["p1", "p2", "p3"]
-        gold      = ["p1", "p2", "p3", "p4"]
-        assert precision_at_k(retrieved, gold) == 1.0
+        gold      = ["p1", "p2", "p3"]
+        assert recall_at_k(retrieved, gold) == 1.0
 
     def test_none_gold(self):
         retrieved = ["p5", "p6"]
         gold      = ["p1", "p2"]
-        assert precision_at_k(retrieved, gold) == 0.0
+        assert recall_at_k(retrieved, gold) == 0.0
 
     def test_partial(self):
-        retrieved = ["p1", "p2", "p5", "p6"]
-        gold      = ["p1", "p2"]
-        assert precision_at_k(retrieved, gold) == pytest.approx(0.5)
+        # 2 of 4 gold passages retrieved → recall = 2/4 = 0.5
+        retrieved = ["p1", "p2"]
+        gold      = ["p1", "p2", "p3", "p4"]
+        assert recall_at_k(retrieved, gold) == pytest.approx(0.5)
 
     def test_empty_retrieved(self):
-        assert precision_at_k([], ["p1"]) == 0.0
+        assert recall_at_k([], ["p1"]) == 0.0
 
     def test_empty_gold(self):
-        assert precision_at_k(["p1", "p2"], []) == 0.0
+        assert recall_at_k(["p1", "p2"], []) == 0.0
 
 
 # ---------------------------------------------------------------------------

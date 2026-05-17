@@ -36,7 +36,7 @@ def _llm(response="SUPPORTS"):
 class TestRunBasic:
     def test_returns_required_keys(self):
         result = scorer.run(EXAMPLES, _retriever(), _llm())
-        assert {"accuracy", "macro_f1", "hallucination_rate", "precision_at_k"} <= result.keys()
+        assert {"accuracy", "macro_f1", "hallucination_rate", "recall_at_k"} <= result.keys()
 
     def test_no_self_consistency_key_by_default(self):
         result = scorer.run(EXAMPLES, _retriever(), _llm())
@@ -109,17 +109,17 @@ class TestPromptTypes:
 
 
 # ---------------------------------------------------------------------------
-# Precision@k
+# Recall@k
 # ---------------------------------------------------------------------------
 
-class TestPrecisionAtK:
-    def test_precision_at_k_present(self):
+class TestRecallAtK:
+    def test_recall_at_k_present(self):
         result = scorer.run(EXAMPLES, _retriever(), _llm())
-        assert "precision_at_k" in result
+        assert "recall_at_k" in result
 
-    def test_precision_at_k_in_range(self):
+    def test_recall_at_k_in_range(self):
         result = scorer.run(EXAMPLES, _retriever(), _llm())
-        assert 0.0 <= result["precision_at_k"] <= 1.0
+        assert 0.0 <= result["recall_at_k"] <= 1.0
 
 
 # ---------------------------------------------------------------------------
