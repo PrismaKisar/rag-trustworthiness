@@ -1,10 +1,11 @@
-"""Poison HotpotQA examples by replacing supporting-fact sentences with distractors.
+"""Poison HotpotQA examples by negating exactly one supporting fact per claim.
 
-Strategy A multi-hop: for every supporting fact ``(title, sent_idx)`` in a
-question, with probability ``poison_rate``, replace the corresponding sentence
-inside ``context`` with a sentence drawn from another question's supporting
-facts. Both hops are addressable: each is independently considered, so a single
-question can have either hop, both, or neither poisoned.
+At poison_rate > 0, one supporting-fact sentence (chosen at random) is
+rewritten by an LLM into a direct contradiction.  Poisoning exactly one hop
+is sufficient to break the multi-hop reasoning chain while keeping the attack
+minimal and interpretable.
+
+At poison_rate == 0.0 the examples are returned unchanged.
 
 Attribution: knowledge-poisoning attack design inspired by Zhou et al. 2024
 (Robustness dimension §2.1); multi-hop adaptation for HotpotQA.
@@ -18,57 +19,75 @@ from copy import deepcopy
 
 logger = logging.getLogger(__name__)
 
+_NEGATION_PROMPT = """\
+Rewrite the following statement so that its meaning is reversed: the new \
+statement must directly contradict the original while remaining a single \
+fluent sentence about the same subject. Do not add explanations, quotes, or \
+prefaces - output only the rewritten statement.
 
-def _supporting_sentence(example: dict, title: str, sent_idx: int) -> str:
-    for ctx_title, sents in example["context"]:
-        if ctx_title == title:
-            return sents[sent_idx]
-    raise KeyError(f"Title {title!r} not in context of question {example['question']!r}")
+Statement: {passage}
+
+Rewritten statement:"""
 
 
-def _collect_supporting_sentences(examples: list[dict]) -> list[tuple[int, str]]:
-    """Return (owner_index, sentence) pairs for every supporting fact in *examples*."""
-    pool: list[tuple[int, str]] = []
-    for i, ex in enumerate(examples):
-        for title, sent_idx in ex["supporting_facts"]:
-            pool.append((i, _supporting_sentence(ex, title, sent_idx)))
-    return pool
+def _negate_passage(passage: str, llm) -> str:
+    """Return an LLM-generated direct negation of *passage*."""
+    prompt = _NEGATION_PROMPT.format(passage=passage)
+    return llm.complete(prompt).strip()
 
 
 def poison_hotpotqa(
     examples: list[dict],
     poison_rate: float,
     seed: int = 42,
+    llm=None,
 ) -> list[dict]:
-    """Return a new list of examples with supporting-fact sentences poisoned."""
+    """Return a new list of examples with exactly one supporting fact negated.
+
+    When poison_rate > 0, exactly one supporting-fact sentence per claim is
+    rewritten by the LLM into a direct contradiction.  The target hop is
+    chosen uniformly at random.
+
+    Args:
+        examples: HotpotQA examples with ``supporting_facts`` and ``context``.
+        poison_rate: 0.0 leaves examples unchanged; any value > 0 triggers
+            single-hop poisoning.  The design assumes binary {0.0, 1.0}.
+        seed: Random seed for reproducible hop selection.
+        llm: LLM client; required when poison_rate > 0.
+
+    Returns:
+        New list of dicts.  Poisoned examples carry a ``poisoned_positions``
+        key with the list containing the one replaced ``[title, sent_idx]``.
+    """
     if not 0.0 <= poison_rate <= 1.0:
         raise ValueError(f"poison_rate must be in [0, 1], got {poison_rate}")
+    if poison_rate > 0.0 and llm is None:
+        raise ValueError("poison_hotpotqa requires an llm client when poison_rate > 0")
+
+    if poison_rate == 0.0:
+        return [deepcopy(ex) for ex in examples]
 
     rng = random.Random(seed)
-    pool = _collect_supporting_sentences(examples)
-
     poisoned_examples: list[dict] = []
-    for i, ex in enumerate(examples):
-        ex_copy = deepcopy(ex)
-        candidates = [s for owner, s in pool if owner != i]
-        poisoned_positions: list[tuple[str, int]] = []
 
-        for title, sent_idx in ex_copy["supporting_facts"]:
-            if rng.random() >= poison_rate or not candidates:
-                continue
-            distractor = rng.choice(candidates)
+    for ex in examples:
+        ex_copy = deepcopy(ex)
+        supporting = list(ex_copy["supporting_facts"])
+
+        if supporting:
+            rng.shuffle(supporting)
+            title, sent_idx = supporting[0]
             for ctx in ex_copy["context"]:
                 if ctx[0] == title:
-                    ctx[1][sent_idx] = distractor
+                    original = ctx[1][sent_idx]
+                    ctx[1][sent_idx] = _negate_passage(original, llm)
                     break
-            poisoned_positions.append((title, sent_idx))
+            ex_copy["poisoned_positions"] = [[title, sent_idx]]
 
-        if poisoned_positions:
-            ex_copy["poisoned_positions"] = poisoned_positions
         poisoned_examples.append(ex_copy)
 
     logger.info(
-        "Poisoned HotpotQA: %d examples, rate=%.2f, seed=%d",
-        len(poisoned_examples), poison_rate, seed,
+        "Poisoned HotpotQA: %d examples, single-hop LLM negation, seed=%d",
+        len(poisoned_examples), seed,
     )
     return poisoned_examples
