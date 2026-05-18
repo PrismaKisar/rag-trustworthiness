@@ -1,4 +1,4 @@
-"""Tests for src/evaluation/metrics.py - all five metric functions."""
+"""Tests for src/evaluation/metrics.py."""
 
 import pytest
 
@@ -7,10 +7,8 @@ from src.evaluation.metrics import (
     contradiction_detection_rate,
     hallucination_rate,
     macro_f1,
-    recall_at_k,
     qa_hallucination_rate,
     retrieval_accuracy_correlation,
-    self_consistency,
 )
 
 
@@ -78,10 +76,8 @@ class TestHallucinationRate:
         assert hallucination_rate(preds, gold) == 0.0
 
     def test_partial(self):
-        # 2 out of 4 NEI gold → 1 hallucinated
         preds = ["SUPPORTS", "NOT ENOUGH INFO", "REFUTES", "SUPPORTS"]
         gold  = ["NOT ENOUGH INFO", "NOT ENOUGH INFO", "SUPPORTS", "REFUTES"]
-        # NEI gold at indices 0,1 → preds: SUPPORTS (hallucinated), NOT ENOUGH INFO (ok)
         assert hallucination_rate(preds, gold) == pytest.approx(0.5)
 
     def test_no_nei_gold_returns_zero(self):
@@ -94,69 +90,8 @@ class TestHallucinationRate:
 
 
 # ---------------------------------------------------------------------------
-# self_consistency
-# ---------------------------------------------------------------------------
-
-class TestSelfConsistency:
-    def test_perfectly_consistent(self):
-        runs = [["SUPPORTS"] * 5, ["REFUTES"] * 5]
-        assert self_consistency(runs) == 1.0
-
-    def test_perfectly_inconsistent(self):
-        # 2 runs, split 1/1 → majority count = 1, score = 0.5 each
-        runs = [["SUPPORTS", "REFUTES"]]
-        assert self_consistency(runs) == pytest.approx(0.5)
-
-    def test_partial(self):
-        # Claim 1: 4/5 agree → 0.8; Claim 2: 5/5 agree → 1.0; mean = 0.9
-        runs = [
-            ["SUPPORTS", "SUPPORTS", "SUPPORTS", "SUPPORTS", "REFUTES"],
-            ["REFUTES"] * 5,
-        ]
-        assert self_consistency(runs) == pytest.approx(0.9)
-
-    def test_single_run(self):
-        # 1/1 agrees with majority → 1.0
-        runs = [["SUPPORTS"]]
-        assert self_consistency(runs) == 1.0
-
-    def test_empty(self):
-        assert self_consistency([]) == 0.0
-
-
-# ---------------------------------------------------------------------------
-# recall_at_k
-# ---------------------------------------------------------------------------
-
-class TestRecallAtK:
-    def test_all_gold(self):
-        # all gold passages are in retrieved → recall = |gold|/|gold| = 1.0
-        retrieved = ["p1", "p2", "p3"]
-        gold      = ["p1", "p2", "p3"]
-        assert recall_at_k(retrieved, gold) == 1.0
-
-    def test_none_gold(self):
-        retrieved = ["p5", "p6"]
-        gold      = ["p1", "p2"]
-        assert recall_at_k(retrieved, gold) == 0.0
-
-    def test_partial(self):
-        # 2 of 4 gold passages retrieved → recall = 2/4 = 0.5
-        retrieved = ["p1", "p2"]
-        gold      = ["p1", "p2", "p3", "p4"]
-        assert recall_at_k(retrieved, gold) == pytest.approx(0.5)
-
-    def test_empty_retrieved(self):
-        assert recall_at_k([], ["p1"]) == 0.0
-
-    def test_empty_gold(self):
-        assert recall_at_k(["p1", "p2"], []) == 0.0
-
-
-# ---------------------------------------------------------------------------
 # exact_match (QA - HotpotQA)
 # ---------------------------------------------------------------------------
-
 
 class TestExactMatch:
     def test_identical(self):
@@ -188,7 +123,6 @@ class TestExactMatch:
 # token_f1 (QA - HotpotQA)
 # ---------------------------------------------------------------------------
 
-
 class TestTokenF1:
     def test_perfect_match(self):
         from src.evaluation.metrics import token_f1
@@ -199,8 +133,6 @@ class TestTokenF1:
         assert token_f1("dog", "cat") == 0.0
 
     def test_partial_overlap(self):
-        # pred tokens: {arthur, clarke}; gold tokens: {arthur, c, clarke}
-        # precision = 2/2 = 1.0, recall = 2/3, f1 = 2*1*(2/3)/(1+2/3) = 0.8
         from src.evaluation.metrics import token_f1
         assert token_f1("Arthur Clarke", "Arthur C Clarke") == pytest.approx(0.8)
 

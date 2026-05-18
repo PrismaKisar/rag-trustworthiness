@@ -1,11 +1,16 @@
 """Scorer for HotpotQA multi-hop QA - three-phase pipeline.
 
 Mirrors src/evaluation/scorer.py but operates on free-form answers:
-    prepare_cases  - sequential retrieval over HotpotQA context paragraphs
+    prepare_cases  - sequential retrieval + injection → list[QACase]
     resolve        - parallel LLM calls, parse free-form answers
-    aggregate      - Exact-Match, token-F1, recall@k, self-consistency
+    aggregate      - Exact-Match, token-F1, hallucination rate
 
-run() composes the three phases for end-to-end evaluation.
+Context composition per example:
+    passages = top-(k - n_supporting) retrieved distractors
+             + supporting paragraphs from example["context"]
+
+Exactly one supporting paragraph is poisoned at r=1; the
+rest of the context is unchanged.
 
 Attribution:
     Sequential RAG pipeline for QA - Lewis et al. 2020 §3.
@@ -15,12 +20,11 @@ Attribution:
 from __future__ import annotations
 
 import logging
-import random
 from collections import Counter
 
 from src.evaluation.cases import QACase, QAResult
 from src.evaluation.dispatch import resolve_raw
-from src.evaluation.metrics import exact_match, recall_at_k, qa_hallucination_rate, self_consistency, token_f1
+from src.evaluation.metrics import exact_match, qa_hallucination_rate, token_f1
 from src.generation.llm_client import LLMClient
 from src.generation.parser import extract_answer
 from src.generation.prompts import QAPromptType, format_prompt
@@ -31,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 - retrieval (sequential)
+# Phase 1 - retrieval + injection (sequential)
 # ---------------------------------------------------------------------------
 
 
@@ -39,30 +43,44 @@ def prepare_cases(
     examples: list[dict],
     retriever: Retriever,
     prompt_type: QAPromptType = "standard_qa",
-    sc_runs: int = 1,
     seed: int = 42,
 ) -> list[QACase]:
-    """Build one QACase per HotpotQA example via sequential retrieval."""
+    """Build one QACase per HotpotQA example via retrieval and direct injection.
+
+    For each example the context is:
+        top-(k - n_supporting) distractors retrieved from the global gold pool
+        + the example's own supporting paragraphs (from ``example["context"]``)
+
+    The supporting paragraphs may include one poisoned passage (r=1).
+
+    Args:
+        examples: HotpotQA examples (keys: ``question``, ``answer``,
+                  ``supporting_facts``, ``context``).
+        retriever: Retriever whose index is rebuilt per example.
+        prompt_type: One of ``"standard_qa"``, ``"cot_qa"``, ``"vigilant_qa"``.
+        seed: Unused; kept for API compatibility.
+    """
     cases: list[QACase] = []
     for i, example in enumerate(examples):
-        corpus = build_hotpotqa_corpus(example)
+        corpus = build_hotpotqa_corpus(example, examples, example_index=i)
         retriever.build(corpus)
-        passages = retriever.retrieve(example["question"])
-        gold_passages = [corpus.passages[j] for j in corpus.gold_indices]
 
-        rng = random.Random(seed + i)
-        prompts = [format_prompt(example["question"], passages, prompt_type)]
-        for _ in range(sc_runs - 1):
-            shuffled = list(passages)
-            rng.shuffle(shuffled)
-            prompts.append(format_prompt(example["question"], shuffled, prompt_type))
+        sup_titles = {title for title, _ in example["supporting_facts"]}
+        supporting = [
+            " ".join(sents)
+            for title, sents in example["context"]
+            if title in sup_titles
+        ]
+        n_gold = len(supporting)
+        k_distractors = max(0, retriever.k - n_gold)
+        retrieved = retriever.retrieve(example["question"], k=k_distractors)
+        passages = retrieved + supporting
 
         cases.append(QACase(
             question=example["question"],
             gold_answer=example["answer"],
-            passages=list(passages),
-            gold_passages=gold_passages,
-            prompts=prompts,
+            passages=passages,
+            prompts=[format_prompt(example["question"], passages, prompt_type)],
             prompt_type=prompt_type,
         ))
 
@@ -108,7 +126,7 @@ def aggregate(
 ) -> dict[str, float]:
     """Compute QA metrics from *cases* and *results*."""
     if not cases:
-        return {"exact_match": 0.0, "token_f1": 0.0, "recall_at_k": 0.0}
+        return {"exact_match": 0.0, "token_f1": 0.0}
 
     em_scores = [
         exact_match(result.predicted_answer, case.gold_answer)
@@ -118,25 +136,15 @@ def aggregate(
         token_f1(result.predicted_answer, case.gold_answer)
         for case, result in zip(cases, results)
     ]
-    precisions = [
-        recall_at_k(case.passages, case.gold_passages)
-        for case in cases
-    ]
 
-    metrics: dict[str, float] = {
+    return {
         "exact_match": sum(em_scores) / len(em_scores),
         "token_f1": sum(f1_scores) / len(f1_scores),
-        "recall_at_k": sum(precisions) / len(precisions),
         "hallucination_rate": qa_hallucination_rate(
             [r.predicted_answer for r in results],
             [case.passages for case in cases],
         ),
     }
-
-    if len(cases[0].prompts) > 1:
-        metrics["self_consistency"] = self_consistency([r.runs for r in results])
-
-    return metrics
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +158,6 @@ def run(
     llm: LLMClient,
     prompt_type: QAPromptType = "standard_qa",
     seed: int = 42,
-    self_consistency_runs: int = 1,
     n_workers: int = 4,
 ) -> dict[str, float]:
     """Run *llm* on every HotpotQA example and return aggregated metrics."""
@@ -161,7 +168,6 @@ def run(
         retriever=retriever,
         llm=llm,
         prompt_type=prompt_type,
-        sc_runs=self_consistency_runs,
         seed=seed,
         n_workers=n_workers,
     )
@@ -180,7 +186,6 @@ class HotpotQATask:
         examples: list[dict],
         retriever,
         prompt_type: str,
-        sc_runs: int,
         seed: int,
         **kwargs,
     ) -> list[QACase]:
@@ -188,7 +193,6 @@ class HotpotQATask:
             examples=examples,
             retriever=retriever,
             prompt_type=prompt_type,
-            sc_runs=sc_runs,
             seed=seed,
         )
 

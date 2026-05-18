@@ -1,9 +1,8 @@
 """Evaluation metrics for RAG fact-verification experiments.
 
-Metrics defined in "the pipeline.md" §5, grounded in:
+Metrics grounded in:
 - Zhou et al. 2024 - Factuality dimension: accuracy, hallucination rate
-- Wang et al. 2022 (via Zhou 2024 §2.1) - self-consistency as output stability
-
+- Yang et al. 2018 - HotpotQA: exact match, token-F1
 """
 
 from __future__ import annotations
@@ -97,48 +96,6 @@ def hallucination_rate(predictions: list[str], gold_labels: list[str]) -> float:
         1 for i in nei_indices if predictions[i] in ("SUPPORTS", "REFUTES")
     )
     return hallucinated / len(nei_indices)
-
-
-def self_consistency(runs_per_claim: list[list[str]]) -> float:
-    """Mean fraction of runs agreeing with the majority label across all claims.
-
-    Args:
-        runs_per_claim: One list of label strings per claim (N runs each).
-                        E.g. [["SUPPORTS", "SUPPORTS", "REFUTES"], ...].
-
-    Returns:
-        Float in [0, 1]. 1.0 = all claims perfectly consistent.
-
-    Attribution: Wang et al. 2022 (cited in Zhou 2024 §2.1) - operationalised as
-    output stability under passage-order perturbation.
-    """
-    if not runs_per_claim:
-        return 0.0
-    scores = []
-    for runs in runs_per_claim:
-        if not runs:
-            continue
-        majority_count = Counter(runs).most_common(1)[0][1]
-        scores.append(majority_count / len(runs))
-    return sum(scores) / len(scores) if scores else 0.0
-
-
-def recall_at_k(retrieved: list[str], gold: list[str]) -> float:
-    """Fraction of gold passages recovered in the top-k retrieved passages.
-
-    Args:
-        retrieved: Top-K passages returned by the retriever.
-        gold:      Ground-truth evidence passages for the claim.
-
-    Returns:
-        Float in [0, 1]. Comparable across claims with different numbers of
-        gold passages (unlike precision@k, whose upper bound depends on |gold|).
-        Capped at 1.0 when more gold passages exist than retrieved slots.
-    """
-    if not retrieved or not gold:
-        return 0.0
-    gold_set = set(gold)
-    return sum(1 for p in retrieved if p in gold_set) / len(gold)
 
 
 def qa_hallucination_rate(

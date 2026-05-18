@@ -14,7 +14,7 @@ class _FakeCase:
 
 
 class _StubTask:
-    def build_cases(self, examples, retriever, prompt_type, sc_runs, seed, **kwargs):
+    def build_cases(self, examples, retriever, prompt_type, seed, **kwargs):
         return [_FakeCase(i) for i in range(len(examples))]
 
     def parse_result(self, case_index: int, raw_runs: list[str]):
@@ -30,7 +30,7 @@ class _StubLLM:
 
 
 # ---------------------------------------------------------------------------
-# Behavior 1 (tracer bullet): run_pipeline returns compute_metrics output
+# Behavior 1: run_pipeline returns compute_metrics output
 # ---------------------------------------------------------------------------
 
 
@@ -54,7 +54,7 @@ class _RecordingTask:
     def __init__(self):
         self.parse_calls: list[tuple[int, list[str]]] = []
 
-    def build_cases(self, examples, retriever, prompt_type, sc_runs, seed, **kwargs):
+    def build_cases(self, examples, retriever, prompt_type, seed, **kwargs):
         return [_FakeCase(i) for i in range(len(examples))]
 
     def parse_result(self, case_index: int, raw_runs: list[str]):
@@ -79,40 +79,7 @@ class TestParseResultCalled:
 
 
 # ---------------------------------------------------------------------------
-# Behavior 3: **task_kwargs forwarded to build_cases
-# ---------------------------------------------------------------------------
-
-
-class _KwargsCapturingTask:
-    def __init__(self):
-        self.received_kwargs: dict = {}
-
-    def build_cases(self, examples, retriever, prompt_type, sc_runs, seed, **kwargs):
-        self.received_kwargs = kwargs
-        return [_FakeCase(0)]
-
-    def parse_result(self, case_index: int, raw_runs: list[str]):
-        return None
-
-    def compute_metrics(self, cases, results, prompt_type: str) -> dict[str, float]:
-        return {}
-
-
-class TestTaskKwargsPassthrough:
-    def test_extra_kwargs_reach_build_cases(self):
-        task = _KwargsCapturingTask()
-        run_pipeline(
-            task=task,
-            examples=[{"q": "x"}],
-            retriever=object(),
-            llm=_StubLLM(),
-            distractor_pool_size=99,
-        )
-        assert task.received_kwargs["distractor_pool_size"] == 99
-
-
-# ---------------------------------------------------------------------------
-# Behavior 4: FeverTask integration produces FEVER metrics
+# Behavior 3: FeverTask integration produces FEVER metrics
 # ---------------------------------------------------------------------------
 
 _FEVER_EXAMPLES = [
@@ -127,6 +94,7 @@ class TestFeverTaskIntegration:
 
         retriever = MagicMock()
         retriever.retrieve.return_value = ["passage A", "passage B"]
+        retriever.k = 10
 
         llm = MagicMock()
         llm.complete.return_value = "SUPPORTS"
@@ -137,13 +105,14 @@ class TestFeverTaskIntegration:
             retriever=retriever,
             llm=llm,
         )
-        assert {"accuracy", "macro_f1", "hallucination_rate", "recall_at_k"} <= metrics.keys()
+        assert {"accuracy", "macro_f1", "hallucination_rate"} <= metrics.keys()
+        assert "recall_at_k" not in metrics
         for val in metrics.values():
             assert 0.0 <= val <= 1.0
 
 
 # ---------------------------------------------------------------------------
-# Behavior 5: HotpotQATask integration produces QA metrics
+# Behavior 4: HotpotQATask integration produces QA metrics
 # ---------------------------------------------------------------------------
 
 _HOTPOT_EXAMPLES = [
@@ -174,6 +143,7 @@ class TestHotpotQATaskIntegration:
 
         retriever = MagicMock()
         retriever.retrieve.return_value = ["passage A", "passage B"]
+        retriever.k = 10
 
         llm = MagicMock()
         llm.complete.return_value = "Answer: Warsaw"
@@ -185,6 +155,7 @@ class TestHotpotQATaskIntegration:
             llm=llm,
             prompt_type="standard_qa",
         )
-        assert {"exact_match", "token_f1", "recall_at_k"} <= metrics.keys()
+        assert {"exact_match", "token_f1"} <= metrics.keys()
+        assert "recall_at_k" not in metrics
         for val in metrics.values():
             assert 0.0 <= val <= 1.0

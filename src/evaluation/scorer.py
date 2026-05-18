@@ -1,24 +1,24 @@
 """Scorer: run a model over FEVER examples and return evaluation metrics.
 
 Three-phase pipeline:
-    prepare_cases  - sequential retrieval → list[EvaluationCase]
-    resolve        - parallel LLM calls   → list[EvaluationResult]
-    aggregate      - pure metric rollup   → dict[str, float]
+    prepare_cases  - sequential retrieval + injection → list[EvaluationCase]
+    resolve        - parallel LLM calls              → list[EvaluationResult]
+    aggregate      - pure metric rollup              → dict[str, float]
 
-run() is a thin composer over the three phases with the same public signature
-as before.
+Context composition per example:
+    passages = top-(k - n_gold) retrieved distractors + example["evidence"]
+
+The example's own evidence (clean at r=0, poisoned at r=1) is injected
+directly after retrieval; the retriever only sources distractors.
 
 Attribution:
     Sequential RAG pipeline for veracity prediction - Singal et al. 2024 §4.
     Factuality metrics (accuracy, macro-F1, hallucination rate) - Zhou et al. 2024.
-    Self-consistency under passage-order perturbation - Wang et al. 2022
-    (cited in Zhou 2024 §2.1 as a robustness-improving prompting technique).
 """
 
 from __future__ import annotations
 
 import logging
-import random
 from collections import Counter
 
 from src.evaluation.cases import EvaluationCase, EvaluationResult
@@ -28,8 +28,6 @@ from src.evaluation.metrics import (
     contradiction_detection_rate,
     hallucination_rate,
     macro_f1,
-    recall_at_k,
-    self_consistency,
 )
 from src.generation.llm_client import LLMClient
 from src.generation.parser import extract_contradiction_flag, extract_label
@@ -41,51 +39,45 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 - retrieval (sequential: embedder / FAISS not thread-safe)
+# Phase 1 - retrieval + injection (sequential: embedder / FAISS not thread-safe)
 # ---------------------------------------------------------------------------
 
 def prepare_cases(
     examples: list[dict],
     retriever: Retriever,
     prompt_type: PromptType = "standard",
-    sc_runs: int = 1,
-    distractor_pool_size: int = 20,
     seed: int = 42,
 ) -> list[EvaluationCase]:
-    """Build one EvaluationCase per example via sequential retrieval.
+    """Build one EvaluationCase per example via retrieval and direct injection.
+
+    For each example the context is:
+        top-(k - n_gold) distractors retrieved from the global gold pool
+        + example["evidence"]  (original gold at r=0; passages at r=1)
 
     Args:
         examples: FEVER examples (keys: ``claim``, ``evidence``, ``label``).
         retriever: Retriever whose index is rebuilt per example.
         prompt_type: One of ``"standard"``, ``"chain_of_thought"``, ``"vigilant"``.
-        sc_runs: Number of prompts per case (passages shuffled between runs ≥2).
-        distractor_pool_size: Distractor passages added to each example corpus.
-        seed: Base random seed for corpus building and passage shuffling.
+        seed: Unused; kept for API compatibility.
 
     Returns:
         List of :class:`~src.evaluation.cases.EvaluationCase` objects,
         one per example, in the same order.
     """
-    corpora = build_all_corpora(examples, distractor_pool_size=distractor_pool_size, seed=seed)
+    corpora = build_all_corpora(examples)
     cases: list[EvaluationCase] = []
-    for i, (example, corpus) in enumerate(zip(examples, corpora)):
+    for example, corpus in zip(examples, corpora):
         retriever.build(corpus)
-        passages = retriever.retrieve(example["claim"])
-        gold_passages = [corpus.passages[j] for j in corpus.gold_indices]
-
-        rng = random.Random(seed + i)
-        prompts = [format_prompt(example["claim"], passages, prompt_type)]
-        for _ in range(sc_runs - 1):
-            shuffled = list(passages)
-            rng.shuffle(shuffled)
-            prompts.append(format_prompt(example["claim"], shuffled, prompt_type))
+        n_gold = len(example["evidence"])
+        k_distractors = max(0, retriever.k - n_gold)
+        retrieved = retriever.retrieve(example["claim"], k=k_distractors)
+        passages = retrieved + list(example["evidence"])
 
         cases.append(EvaluationCase(
             claim=example["claim"],
             gold_label=example["label"],
-            passages=list(passages),
-            gold_passages=gold_passages,
-            prompts=prompts,
+            passages=passages,
+            prompts=[format_prompt(example["claim"], passages, prompt_type)],
             prompt_type=prompt_type,
         ))
 
@@ -101,17 +93,7 @@ def resolve(
     llm: LLMClient,
     n_workers: int = 4,
 ) -> list[EvaluationResult]:
-    """Dispatch LLM calls for every prompt in *cases* and return results.
-
-    Args:
-        cases: Output of :func:`prepare_cases`.
-        llm: LLM client implementing ``.complete(prompt, max_tokens) -> str``.
-        n_workers: Thread-pool size for parallel dispatch.
-
-    Returns:
-        List of :class:`~src.evaluation.cases.EvaluationResult` objects,
-        one per case, in the same order.
-    """
+    """Dispatch LLM calls for every prompt in *cases* and return results."""
     if not cases:
         return []
 
@@ -146,35 +128,23 @@ def aggregate(
 ) -> dict[str, float]:
     """Compute evaluation metrics from *cases* and *results*.
 
-    Pure function - no I/O, no randomness.
-
     Args:
         cases: Output of :func:`prepare_cases`.
         results: Output of :func:`resolve`, same order as *cases*.
-        prompt_type: Used to decide which optional metrics to include.
-            ``"vigilant"`` adds ``contradiction_detection_rate``.
+        prompt_type: ``"vigilant"`` adds ``contradiction_detection_rate``.
 
     Returns:
         Dict with ``accuracy``, ``macro_f1``, ``hallucination_rate``,
-        ``recall_at_k``, ``self_consistency`` (only when sc_runs > 1),
         and ``contradiction_detection_rate`` (only when prompt_type == "vigilant").
     """
     gold_labels = [case.gold_label for case in cases]
     predictions = [result.predicted_label for result in results]
-    precisions = [
-        recall_at_k(case.passages, case.gold_passages)
-        for case in cases
-    ]
 
     metrics: dict[str, float] = {
         "accuracy": accuracy(predictions, gold_labels),
         "macro_f1": macro_f1(predictions, gold_labels),
         "hallucination_rate": hallucination_rate(predictions, gold_labels),
-        "recall_at_k": sum(precisions) / len(precisions) if precisions else 0.0,
     }
-
-    if cases and len(cases[0].prompts) > 1:
-        metrics["self_consistency"] = self_consistency([r.runs for r in results])
 
     if prompt_type == "vigilant":
         metrics["contradiction_detection_rate"] = contradiction_detection_rate(
@@ -185,7 +155,7 @@ def aggregate(
 
 
 # ---------------------------------------------------------------------------
-# Composer - preserves the original public signature
+# Composer
 # ---------------------------------------------------------------------------
 
 def run(
@@ -193,9 +163,7 @@ def run(
     retriever: Retriever,
     llm: LLMClient,
     prompt_type: PromptType = "standard",
-    distractor_pool_size: int = 20,
     seed: int = 42,
-    self_consistency_runs: int = 1,
     n_workers: int = 4,
 ) -> dict[str, float]:
     """Run *llm* on every example and return aggregated metrics."""
@@ -206,10 +174,8 @@ def run(
         retriever=retriever,
         llm=llm,
         prompt_type=prompt_type,
-        sc_runs=self_consistency_runs,
         seed=seed,
         n_workers=n_workers,
-        distractor_pool_size=distractor_pool_size,
     )
 
 
@@ -226,7 +192,6 @@ class FeverTask:
         examples: list[dict],
         retriever,
         prompt_type: str,
-        sc_runs: int,
         seed: int,
         **kwargs,
     ) -> list[EvaluationCase]:
@@ -234,9 +199,7 @@ class FeverTask:
             examples=examples,
             retriever=retriever,
             prompt_type=prompt_type,
-            sc_runs=sc_runs,
             seed=seed,
-            distractor_pool_size=kwargs.get("distractor_pool_size", 20),
         )
 
     def parse_result(self, case_index: int, raw_runs: list[str]) -> EvaluationResult:

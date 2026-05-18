@@ -1,7 +1,4 @@
-"""Failure classification and retrieval for qualitative analysis.
-
-Used in the qualitative failure analysis section of the poisoning notebook.
-"""
+"""Failure classification and retrieval for qualitative analysis."""
 
 from __future__ import annotations
 
@@ -9,37 +6,25 @@ from typing import Literal
 
 from src.evaluation.cases import EvaluationCase, EvaluationResult
 
-FailureType = Literal["correct", "convinced_by_minority_poison", "nei_collapse", "other_error"]
+FailureType = Literal["correct", "nei_collapse", "other_error"]
 
 
 def classify_failure(case: EvaluationCase, result: EvaluationResult) -> FailureType:
     """Classify one (case, result) pair into a failure category.
 
     Returns:
-        ``"correct"``                   - prediction matches gold label.
-        ``"nei_collapse"``              - model predicts NOT ENOUGH INFO for a
-                                          factual claim when no gold passages
-                                          were retrieved.
-        ``"convinced_by_minority_poison"`` - wrong prediction despite a majority
-                                          of retrieved passages being gold evidence.
-        ``"other_error"``               - wrong prediction not covered above.
+        ``"correct"``      - prediction matches gold label.
+        ``"nei_collapse"`` - model predicts NOT ENOUGH INFO for a factual claim.
+        ``"other_error"``  - any other wrong prediction.
     """
     if result.predicted_label == case.gold_label:
         return "correct"
 
-    gold_set = set(case.gold_passages)
-    n_gold = sum(1 for p in case.passages if p in gold_set)
-    n_non_gold = len(case.passages) - n_gold
-
     if (
         result.predicted_label == "NOT ENOUGH INFO"
         and case.gold_label != "NOT ENOUGH INFO"
-        and n_gold == 0
     ):
         return "nei_collapse"
-
-    if n_non_gold >= 1 and n_gold > n_non_gold:
-        return "convinced_by_minority_poison"
 
     return "other_error"
 

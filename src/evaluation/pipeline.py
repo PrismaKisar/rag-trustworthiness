@@ -20,7 +20,6 @@ class EvaluationTask(Protocol):
         examples: list[dict],
         retriever,
         prompt_type: str,
-        sc_runs: int,
         seed: int,
         **kwargs,
     ) -> list:
@@ -44,13 +43,12 @@ def run_pipeline(
     retriever,
     llm,
     prompt_type: str = "standard",
-    sc_runs: int = 1,
     seed: int = 42,
     n_workers: int = 4,
     **task_kwargs,
 ) -> dict[str, float]:
     """Drive *task* through the three-phase pipeline and return metrics."""
-    cases = task.build_cases(examples, retriever, prompt_type, sc_runs, seed, **task_kwargs)
+    cases = task.build_cases(examples, retriever, prompt_type, seed, **task_kwargs)
     raw = resolve_raw(cases, llm, n_workers=n_workers)
     results = [task.parse_result(i, runs) for i, runs in enumerate(raw)]
     return task.compute_metrics(cases, results, prompt_type)
