@@ -6,18 +6,23 @@ dataset:
   default: "fever"            # one of: fever, hotpotqa (overridable via CLI)
   fever_dev: "data/fever/dev.jsonl"
   fever_train: "data/fever/train.jsonl"
+  fever_dev_poisoned: "data/fever/dev_poisoned.jsonl"
   hotpotqa_dev: "data/hotpotqa/dev.jsonl"
+  hotpotqa_dev_poisoned: "data/hotpotqa/dev_poisoned.jsonl"
+
+# --- Negation ---
+negation:
+  model: "Qwen/Qwen2.5-1.5B-Instruct"  # fixed model for pre-computing LLM negations
 
 # --- Retrieval ---
 retrieval:
   embedding_model: "IEITYuan/Yuan-embedding-2.0-en"
-  k: 5                        # top-K passages returned to the LLM
-  distractor_pool_size: 20    # random passages added to per-example retrieval pool
+  k: 10                       # top-K passages returned to the LLM
 
 # --- Poisoning ---
 poisoning:
-  poison_rate: 0.0            # fraction of evidence passages replaced (overridable via CLI)
-  strategy: "opposite_label"  # Strategy A: distractors from opposite-label claims
+  poison_rate: 0.0            # 0.0 (clean) or 1.0 (fully poisoned); overridable via CLI
+  strategy: "llm_negation"    # LLM rewrites gold evidence into a direct contradiction
 
 # --- Models ---
 models:
@@ -26,10 +31,7 @@ models:
     - "Qwen/Qwen2.5-1.5B-Instruct"
     - "google/gemma-2-2b-it"
     - "HuggingFaceTB/SmolLM2-1.7B-Instruct"
-    - "microsoft/Phi-3.5-mini-instruct"
-    - "meta-llama/Llama-3.2-3B-Instruct"
-  temperature: 0.0            # 0.0 for deterministic; >0 required for self-consistency runs
-  temperature_consistency: 0.7
+  temperature: 0.0
 
 # --- Prompts ---
 prompts:
@@ -39,8 +41,6 @@ prompts:
 # --- Evaluation ---
 evaluation:
   n_examples: 50              # claims evaluated in main experiment
-  self_consistency_runs: 5    # inference repetitions for self-consistency metric
-  self_consistency_subset: 30 # number of claims used for self-consistency experiment
 
 # --- Caching ---
 cache:
