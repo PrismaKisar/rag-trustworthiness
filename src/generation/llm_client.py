@@ -178,7 +178,7 @@ class HuggingFaceClient(LLMClient):
         # low_cpu_mem_usage loads shards sequentially to avoid the full fp32
         # copy in RAM; explicit .to() then moves to target device in one step.
         self._hf_model = AutoModelForCausalLM.from_pretrained(
-            self._model, torch_dtype=dtype, low_cpu_mem_usage=True
+            self._model, dtype=dtype, low_cpu_mem_usage=True
         ).to(self._device)
 
     def close(self) -> None:
@@ -187,13 +187,13 @@ class HuggingFaceClient(LLMClient):
             del self._tokenizer
             self._hf_model = None
             self._tokenizer = None
+            gc.collect()
             if self._device == "mps":
                 torch.mps.synchronize()
                 torch.mps.empty_cache()
             elif self._device == "cuda":
                 torch.cuda.synchronize()
                 torch.cuda.empty_cache()
-            gc.collect()
         super().close()
 
     def _call_api(self, prompt: str) -> str:
