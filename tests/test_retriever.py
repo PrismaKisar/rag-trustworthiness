@@ -1,14 +1,7 @@
-"""Tests for src/retrieval/retriever.py (step 11).
-
-Assertions:
-- retrieve() returns exactly K results.
-- Precision@k is computable (gold_indices available from RetrievalCorpus).
-- RuntimeError raised when build() has not been called.
-"""
+"""Tests for src/retrieval/retriever.py."""
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 
 from src.retrieval.corpus import RetrievalCorpus
@@ -31,8 +24,6 @@ PASSAGES = [
     "Python is a programming language.",
 ]
 
-GOLD_INDICES = {0, 1}  # first two passages are "gold"
-
 
 @pytest.fixture(scope="session")
 def embedder(tmp_path_factory):
@@ -43,7 +34,7 @@ def embedder(tmp_path_factory):
 
 @pytest.fixture(scope="session")
 def corpus():
-    return RetrievalCorpus(passages=PASSAGES, gold_indices=GOLD_INDICES)
+    return RetrievalCorpus(passages=PASSAGES)
 
 
 @pytest.fixture(scope="session")
@@ -54,7 +45,21 @@ def built_retriever(embedder, corpus):
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# k property
+# ---------------------------------------------------------------------------
+
+class TestKProperty:
+    def test_k_matches_constructor(self, embedder):
+        r = Retriever(embedder=embedder, k=7)
+        assert r.k == 7
+
+    def test_default_k(self, embedder):
+        r = Retriever(embedder=embedder)
+        assert r.k == 5
+
+
+# ---------------------------------------------------------------------------
+# retrieve returns exactly k results
 # ---------------------------------------------------------------------------
 
 class TestRetrieverReturnsExactlyK:
@@ -75,26 +80,15 @@ class TestRetrieverReturnsExactlyK:
         results = built_retriever.retrieve("capital city", k=3)
         assert all(p in PASSAGES for p in results)
 
-
-class TestRecallAtK:
-    """recall@k = |retrieved ∩ gold| / |gold| - must be computable from corpus."""
-
-    def _recall_at_k(self, retrieved: list[str], corpus: RetrievalCorpus) -> float:
-        gold_passages = {corpus.passages[i] for i in corpus.gold_indices}
-        hits = sum(1 for p in retrieved if p in gold_passages)
-        return hits / len(gold_passages) if gold_passages else 0.0
-
-    def test_recall_at_k_in_range(self, built_retriever, corpus):
-        results = built_retriever.retrieve("Paris Eiffel Tower", k=3)
-        r_at_k = self._recall_at_k(results, corpus)
-        assert 0.0 <= r_at_k <= 1.0
-
-    def test_recall_at_k_relevant_query(self, built_retriever, corpus):
-        """A query about Paris/Eiffel should surface gold passages."""
+    def test_relevant_query_surfaces_related_passages(self, built_retriever):
         results = built_retriever.retrieve("Paris Eiffel Tower capital France", k=2)
-        r_at_k = self._recall_at_k(results, corpus)
-        assert r_at_k > 0.0, "Expected at least one gold passage in top-2 for a Paris query"
+        paris_related = {PASSAGES[0], PASSAGES[1]}
+        assert any(p in paris_related for p in results)
 
+
+# ---------------------------------------------------------------------------
+# build guard
+# ---------------------------------------------------------------------------
 
 class TestRetrieveBuildGuard:
     def test_raises_before_build(self, embedder):

@@ -46,6 +46,16 @@ FAKE_EXAMPLES = [
 _LABEL_CYCLE = ["SUPPORTS", "REFUTES", "NOT ENOUGH INFO", "SUPPORTS", "REFUTES"]
 
 
+def _make_embedder_mock():
+    import numpy as np
+    embedder_instance = MagicMock()
+    embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
+        (len(texts), 384)
+    ).astype("float32")
+    embedder_instance.embedding_dim = 384
+    return embedder_instance
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -61,19 +71,11 @@ def mock_llm():
 def test_pipeline_returns_valid_metrics(mock_llm, tmp_path):
     """Pipeline runs end-to-end with 5 mocked examples and returns metric keys."""
     with (
-        patch("src.pipeline.load_fever", return_value=FAKE_EXAMPLES) as mock_load,
+        patch("src.pipeline.load_fever", return_value=FAKE_EXAMPLES),
         patch("src.pipeline.Embedder") as MockEmbedder,
         patch("src.pipeline._build_llm", return_value=mock_llm),
     ):
-        # Make embedder produce deterministic dummy vectors
-        import numpy as np
-
-        embedder_instance = MagicMock()
-        embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
-            (len(texts), 384)
-        ).astype("float32")
-        embedder_instance.embedding_dim = 384
-        MockEmbedder.return_value = embedder_instance
+        MockEmbedder.return_value = _make_embedder_mock()
 
         metrics = main([
             "--config", "configs/config.yaml",
@@ -82,103 +84,47 @@ def test_pipeline_returns_valid_metrics(mock_llm, tmp_path):
             "--model", "claude-haiku-4-5-20251001",
             "--prompt_type", "standard",
             "--seed", "42",
-            "--self_consistency_runs", "1",
         ])
 
-    required_keys = {"accuracy", "macro_f1", "hallucination_rate", "recall_at_k"}
+    required_keys = {"accuracy", "macro_f1", "hallucination_rate"}
     assert required_keys.issubset(metrics.keys()), f"Missing keys: {required_keys - metrics.keys()}"
+    assert "recall_at_k" not in metrics
 
     for key in required_keys:
         assert 0.0 <= metrics[key] <= 1.0, f"{key}={metrics[key]} not in [0, 1]"
 
-    assert mock_load.called
 
-
-def test_pipeline_poison_rate_override(mock_llm, tmp_path):
-    """Poisoner is invoked when poison_rate > 0."""
+def test_pipeline_poisoned_loader_used_when_poison_rate_positive(mock_llm):
+    """When poison_rate > 0, the pre-computed poisoned file is loaded (not the poisoner)."""
     with (
-        patch("src.pipeline.load_fever", return_value=FAKE_EXAMPLES),
+        patch("src.pipeline.load_fever", return_value=FAKE_EXAMPLES) as mock_load,
         patch("src.pipeline.Embedder") as MockEmbedder,
         patch("src.pipeline._build_llm", return_value=mock_llm),
-        patch("src.pipeline.poison_dataset", wraps=lambda ex, **kw: ex) as mock_poison,
     ):
-        import numpy as np
-
-        embedder_instance = MagicMock()
-        embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
-            (len(texts), 384)
-        ).astype("float32")
-        embedder_instance.embedding_dim = 384
-        MockEmbedder.return_value = embedder_instance
-
+        MockEmbedder.return_value = _make_embedder_mock()
         mock_llm.complete.side_effect = [f"Final Label: {lbl}" for lbl in _LABEL_CYCLE]
 
         main([
             "--config", "configs/config.yaml",
             "--n", "5",
-            "--poison_rate", "0.5",
+            "--poison_rate", "1.0",
             "--model", "claude-haiku-4-5-20251001",
             "--prompt_type", "standard",
-            "--self_consistency_runs", "1",
         ])
 
-    mock_poison.assert_called_once()
-    _, kwargs = mock_poison.call_args
-    assert kwargs["poison_rate"] == 0.5
+    mock_load.assert_called_once()
+    loaded_path = mock_load.call_args[0][0]
+    assert "poisoned" in loaded_path, f"Expected poisoned path, got: {loaded_path}"
 
 
-def test_pipeline_passes_strategy_to_poisoner(mock_llm):
-    """Pipeline must forward poisoning.strategy and llm to poison_dataset."""
+def test_pipeline_clean_loader_used_when_poison_rate_zero(mock_llm):
+    """When poison_rate == 0.0, the clean dev file is loaded."""
     with (
-        patch("src.pipeline.load_fever", return_value=FAKE_EXAMPLES),
+        patch("src.pipeline.load_fever", return_value=FAKE_EXAMPLES) as mock_load,
         patch("src.pipeline.Embedder") as MockEmbedder,
         patch("src.pipeline._build_llm", return_value=mock_llm),
-        patch("src.pipeline.poison_dataset", wraps=lambda ex, **kw: ex) as mock_poison,
     ):
-        import numpy as np
-
-        embedder_instance = MagicMock()
-        embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
-            (len(texts), 384)
-        ).astype("float32")
-        embedder_instance.embedding_dim = 384
-        MockEmbedder.return_value = embedder_instance
-
-        mock_llm.complete.side_effect = [f"Final Label: {lbl}" for lbl in _LABEL_CYCLE]
-
-        main([
-            "--config", "configs/config.yaml",
-            "--n", "5",
-            "--poison_rate", "0.5",
-            "--strategy", "llm_negation",
-            "--model", "claude-haiku-4-5-20251001",
-            "--prompt_type", "standard",
-            "--self_consistency_runs", "1",
-        ])
-
-    mock_poison.assert_called_once()
-    _, kwargs = mock_poison.call_args
-    assert kwargs["strategy"] == "llm_negation"
-    assert kwargs.get("llm") is mock_llm
-
-
-def test_pipeline_no_poison_skips_poisoner(mock_llm):
-    """Poisoner is NOT called when poison_rate == 0.0."""
-    with (
-        patch("src.pipeline.load_fever", return_value=FAKE_EXAMPLES),
-        patch("src.pipeline.Embedder") as MockEmbedder,
-        patch("src.pipeline._build_llm", return_value=mock_llm),
-        patch("src.pipeline.poison_dataset") as mock_poison,
-    ):
-        import numpy as np
-
-        embedder_instance = MagicMock()
-        embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
-            (len(texts), 384)
-        ).astype("float32")
-        embedder_instance.embedding_dim = 384
-        MockEmbedder.return_value = embedder_instance
-
+        MockEmbedder.return_value = _make_embedder_mock()
         mock_llm.complete.side_effect = [f"Final Label: {lbl}" for lbl in _LABEL_CYCLE]
 
         main([
@@ -187,10 +133,11 @@ def test_pipeline_no_poison_skips_poisoner(mock_llm):
             "--poison_rate", "0.0",
             "--model", "claude-haiku-4-5-20251001",
             "--prompt_type", "standard",
-            "--self_consistency_runs", "1",
         ])
 
-    mock_poison.assert_not_called()
+    mock_load.assert_called_once()
+    loaded_path = mock_load.call_args[0][0]
+    assert "poisoned" not in loaded_path, f"Expected clean path, got: {loaded_path}"
 
 
 # ---------------------------------------------------------------------------
@@ -230,14 +177,7 @@ def test_pipeline_routes_to_hotpotqa(tmp_path):
         patch("src.pipeline.Embedder") as MockEmbedder,
         patch("src.pipeline._build_llm", return_value=mock_llm),
     ):
-        import numpy as np
-
-        embedder_instance = MagicMock()
-        embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
-            (len(texts), 384)
-        ).astype("float32")
-        embedder_instance.embedding_dim = 384
-        MockEmbedder.return_value = embedder_instance
+        MockEmbedder.return_value = _make_embedder_mock()
 
         metrics = main([
             "--config", "configs/config.yaml",
@@ -247,28 +187,49 @@ def test_pipeline_routes_to_hotpotqa(tmp_path):
             "--model", "claude-haiku-4-5-20251001",
             "--prompt_type", "standard_qa",
             "--seed", "42",
-            "--self_consistency_runs", "1",
         ])
 
     mock_load.assert_called_once()
     mock_fever_load.assert_not_called()
-    assert {"exact_match", "token_f1", "recall_at_k"} <= metrics.keys()
-    for key in ("exact_match", "token_f1", "recall_at_k"):
+    assert {"exact_match", "token_f1"} <= metrics.keys()
+    assert "recall_at_k" not in metrics
+    for key in ("exact_match", "token_f1"):
         assert 0.0 <= metrics[key] <= 1.0
 
 
-# ---------------------------------------------------------------------------
-# Candidate #3: DatasetRunner deepened - loader + task + poisoner fields
-# ---------------------------------------------------------------------------
+def test_pipeline_hotpotqa_poisoned_loader_used(tmp_path):
+    """When dataset=hotpotqa and poison_rate>0, the pre-computed poisoned file is loaded."""
+    mock_llm = MagicMock()
+    mock_llm.complete.side_effect = ["Answer: x"] * 4
+
+    with (
+        patch("src.pipeline.load_hotpotqa", return_value=FAKE_HOTPOT_EXAMPLES) as mock_load,
+        patch("src.pipeline.Embedder") as MockEmbedder,
+        patch("src.pipeline._build_llm", return_value=mock_llm),
+    ):
+        MockEmbedder.return_value = _make_embedder_mock()
+
+        main([
+            "--config", "configs/config.yaml",
+            "--dataset", "hotpotqa",
+            "--n", "2",
+            "--poison_rate", "1.0",
+            "--model", "claude-haiku-4-5-20251001",
+            "--prompt_type", "standard_qa",
+        ])
+
+    mock_load.assert_called_once()
+    loaded_path = mock_load.call_args[0][0]
+    assert "poisoned" in loaded_path, f"Expected poisoned path, got: {loaded_path}"
 
 
-class _FakeCase:
-    prompts = ["prompt_0"]
-    prompt_type = "standard"
+# ---------------------------------------------------------------------------
+# DatasetRunner tests
+# ---------------------------------------------------------------------------
 
 
 class _TraceTask:
-    def build_cases(self, examples, retriever, prompt_type, sc_runs, seed, **kwargs):
+    def build_cases(self, examples, retriever, prompt_type, seed, **kwargs):
         return []
 
     def parse_result(self, case_index, raw_runs):
@@ -280,7 +241,6 @@ class _TraceTask:
 
 class TestDatasetRunnerNewInterface:
     def test_loader_field_called_and_metrics_returned(self):
-        """DatasetRunner dispatches via loader + task; loader provides examples."""
         import numpy as np
         from src.pipeline import DatasetRunner, _DATASET_REGISTRY
 
@@ -296,12 +256,7 @@ class TestDatasetRunnerNewInterface:
                 patch("src.pipeline.Embedder") as MockEmbedder,
                 patch("src.pipeline._build_llm", return_value=MagicMock()),
             ):
-                embedder_instance = MagicMock()
-                embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
-                    (len(texts), 384)
-                ).astype("float32")
-                embedder_instance.embedding_dim = 384
-                MockEmbedder.return_value = embedder_instance
+                MockEmbedder.return_value = _make_embedder_mock()
 
                 result = main([
                     "--config", "configs/config.yaml",
@@ -309,7 +264,6 @@ class TestDatasetRunnerNewInterface:
                     "--n", "1",
                     "--poison_rate", "0.0",
                     "--seed", "42",
-                    "--self_consistency_runs", "1",
                 ])
 
             mock_loader.assert_called_once()
@@ -317,55 +271,107 @@ class TestDatasetRunnerNewInterface:
         finally:
             del _DATASET_REGISTRY["_trace"]
 
-    def test_poisoner_field_called_when_poison_rate_positive(self):
-        """DatasetRunner.poisoner is invoked and receives poison_rate when rate > 0."""
+    def test_poisoned_loader_called_when_poison_rate_positive(self):
         import numpy as np
         from src.pipeline import DatasetRunner, _DATASET_REGISTRY
 
         stub_examples = [{"q": "x"}]
         mock_loader = MagicMock(return_value=stub_examples)
-        mock_poisoner = MagicMock(return_value=stub_examples)
+        mock_poisoned_loader = MagicMock(return_value=stub_examples)
 
         _DATASET_REGISTRY["_poison_test"] = DatasetRunner(
             loader=mock_loader,
             task=_TraceTask(),
             default_prompt_fn=lambda cfg: "standard",
-            poisoner=mock_poisoner,
+            poisoned_loader=mock_poisoned_loader,
         )
         try:
             with (
                 patch("src.pipeline.Embedder") as MockEmbedder,
                 patch("src.pipeline._build_llm", return_value=MagicMock()),
             ):
-                embedder_instance = MagicMock()
-                embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
-                    (len(texts), 384)
-                ).astype("float32")
-                embedder_instance.embedding_dim = 384
-                MockEmbedder.return_value = embedder_instance
+                MockEmbedder.return_value = _make_embedder_mock()
 
                 main([
                     "--config", "configs/config.yaml",
                     "--dataset", "_poison_test",
                     "--n", "1",
-                    "--poison_rate", "0.5",
+                    "--poison_rate", "1.0",
                     "--seed", "42",
-                    "--self_consistency_runs", "1",
                 ])
 
-            mock_poisoner.assert_called_once()
-            _, kwargs = mock_poisoner.call_args
-            assert kwargs.get("poison_rate") == 0.5
+            mock_poisoned_loader.assert_called_once()
+            mock_loader.assert_not_called()
         finally:
             del _DATASET_REGISTRY["_poison_test"]
 
+    def test_loader_called_not_poisoned_loader_at_rate_zero(self):
+        import numpy as np
+        from src.pipeline import DatasetRunner, _DATASET_REGISTRY
+
+        stub_examples = [{"q": "x"}]
+        mock_loader = MagicMock(return_value=stub_examples)
+        mock_poisoned_loader = MagicMock(return_value=stub_examples)
+
+        _DATASET_REGISTRY["_clean_test"] = DatasetRunner(
+            loader=mock_loader,
+            task=_TraceTask(),
+            default_prompt_fn=lambda cfg: "standard",
+            poisoned_loader=mock_poisoned_loader,
+        )
+        try:
+            with (
+                patch("src.pipeline.Embedder") as MockEmbedder,
+                patch("src.pipeline._build_llm", return_value=MagicMock()),
+            ):
+                MockEmbedder.return_value = _make_embedder_mock()
+
+                main([
+                    "--config", "configs/config.yaml",
+                    "--dataset", "_clean_test",
+                    "--n", "1",
+                    "--poison_rate", "0.0",
+                    "--seed", "42",
+                ])
+
+            mock_loader.assert_called_once()
+            mock_poisoned_loader.assert_not_called()
+        finally:
+            del _DATASET_REGISTRY["_clean_test"]
+
+    def test_no_poisoned_loader_raises_on_poison_rate_positive(self):
+        import numpy as np
+        from src.pipeline import DatasetRunner, _DATASET_REGISTRY
+
+        _DATASET_REGISTRY["_no_poison"] = DatasetRunner(
+            loader=MagicMock(return_value=[{"q": "x"}]),
+            task=_TraceTask(),
+            default_prompt_fn=lambda cfg: "standard",
+            poisoned_loader=None,
+        )
+        try:
+            with (
+                patch("src.pipeline.Embedder") as MockEmbedder,
+                patch("src.pipeline._build_llm", return_value=MagicMock()),
+                pytest.raises(ValueError, match="poisoned"),
+            ):
+                MockEmbedder.return_value = _make_embedder_mock()
+
+                main([
+                    "--config", "configs/config.yaml",
+                    "--dataset", "_no_poison",
+                    "--n", "1",
+                    "--poison_rate", "1.0",
+                    "--seed", "42",
+                ])
+        finally:
+            del _DATASET_REGISTRY["_no_poison"]
+
 
 def test_custom_dataset_registered_and_dispatched():
-    """A DatasetRunner added to _DATASET_REGISTRY is dispatched through main()."""
     import numpy as np
     from src.pipeline import DatasetRunner, _DATASET_REGISTRY
 
-    metrics_stub = {"custom_metric": 0.75}
     mock_loader = MagicMock(return_value=[{"q": "x"}])
 
     custom_runner = DatasetRunner(
@@ -379,12 +385,7 @@ def test_custom_dataset_registered_and_dispatched():
             patch("src.pipeline.Embedder") as MockEmbedder,
             patch("src.pipeline._build_llm", return_value=MagicMock()),
         ):
-            embedder_instance = MagicMock()
-            embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
-                (len(texts), 384)
-            ).astype("float32")
-            embedder_instance.embedding_dim = 384
-            MockEmbedder.return_value = embedder_instance
+            MockEmbedder.return_value = _make_embedder_mock()
 
             result = main([
                 "--config", "configs/config.yaml",
@@ -392,47 +393,9 @@ def test_custom_dataset_registered_and_dispatched():
                 "--n", "1",
                 "--poison_rate", "0.0",
                 "--seed", "42",
-                "--self_consistency_runs", "1",
             ])
 
         mock_loader.assert_called_once()
         assert result == {"tracer_metric": 0.5}
     finally:
         del _DATASET_REGISTRY["custom"]
-
-
-def test_pipeline_hotpotqa_poisoner_invoked(tmp_path):
-    """When dataset=hotpotqa and poison_rate>0, the HotpotQA poisoner runs."""
-    mock_llm = MagicMock()
-    mock_llm.complete.side_effect = ["Answer: x"] * 4
-
-    with (
-        patch("src.pipeline.load_hotpotqa", return_value=FAKE_HOTPOT_EXAMPLES),
-        patch("src.pipeline.Embedder") as MockEmbedder,
-        patch("src.pipeline._build_llm", return_value=mock_llm),
-        patch("src.pipeline.poison_hotpotqa", wraps=lambda ex, **kw: ex) as mock_poison,
-        patch("src.pipeline.poison_dataset") as mock_fever_poison,
-    ):
-        import numpy as np
-
-        embedder_instance = MagicMock()
-        embedder_instance.encode.side_effect = lambda texts: np.random.default_rng(0).random(
-            (len(texts), 384)
-        ).astype("float32")
-        embedder_instance.embedding_dim = 384
-        MockEmbedder.return_value = embedder_instance
-
-        main([
-            "--config", "configs/config.yaml",
-            "--dataset", "hotpotqa",
-            "--n", "2",
-            "--poison_rate", "0.5",
-            "--model", "claude-haiku-4-5-20251001",
-            "--prompt_type", "standard_qa",
-            "--self_consistency_runs", "1",
-        ])
-
-    mock_poison.assert_called_once()
-    mock_fever_poison.assert_not_called()
-    _, kwargs = mock_poison.call_args
-    assert kwargs["poison_rate"] == 0.5

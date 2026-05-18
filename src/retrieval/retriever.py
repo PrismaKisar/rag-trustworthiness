@@ -35,6 +35,10 @@ class Retriever:
         self._passages: list[str] = []
         self._index: FaissIndex | None = None
 
+    @property
+    def k(self) -> int:
+        return self._k
+
     # ------------------------------------------------------------------
     # Index construction
     # ------------------------------------------------------------------

@@ -1,118 +1,99 @@
 """Build per-example retrieval pools for FAISS indexing.
 
-For each evaluated claim the retrieval pool is:
-    gold/poisoned evidence (from the example itself)
-    + ``distractor_pool_size`` random passages sampled from *other* claims.
+For each evaluated claim the retrieval pool is the *global gold passage pool*:
+all evidence passages from every other example in the full dataset.  The
+claim's own evidence is excluded so retrieval remains non-trivial.
 
-The distractor passages ensure that top-K retrieval is non-trivial and that
-robustness can be meaningfully measured across poison rates.
-
-Architecture: Sequential RAG pipeline shape - Lewis et al. 2020 §3;
-corpus-level distractor injection motivated by Zhou et al. 2024 §2.1.
+Poisoned passages are injected by the pipeline after retrieval
+and are never stored in this corpus.
 """
 
 from __future__ import annotations
 
-import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
 class RetrievalCorpus:
-    """Passages and gold-passage membership for one example.
+    """Passages for one example's retrieval pool.
 
     Attributes:
-        passages: All passages in the pool (evidence + distractors).
-        gold_indices: Indices of passages that came from the example's own
-                      evidence field - used to compute recall@k.
+        passages: All passages drawn from the global gold pool (other examples).
     """
 
     passages: list[str]
-    gold_indices: set[int] = field(default_factory=set)
 
 
 def build_corpus(
     example: dict,
     all_examples: list[dict],
-    distractor_pool_size: int = 20,
-    seed: int = 42,
     *,
     example_index: int | None = None,
 ) -> RetrievalCorpus:
-    """Build the retrieval pool for *example*.
+    """Build the global gold passage pool for *example*.
 
     Args:
-        example: A single dict with keys ``claim``, ``evidence`` (list[str]),
-                 ``label``.  Evidence may already be poisoned.
-        all_examples: Full dataset used to sample random distractor passages
-                      from claims other than *example*.
-        distractor_pool_size: Number of random distractor passages to add.
-        seed: Random seed for reproducible distractor sampling.
-        example_index: Position of *example* in *all_examples*.  When
-                       provided, the example itself is excluded from the
-                       distractor pool by index (faster than set lookup).
+        example: Dict with keys ``claim``, ``evidence`` (list[str]), ``label``.
+        all_examples: Full dataset; every other example's evidence enters the pool.
+        example_index: Index of *example* in *all_examples* for fast exclusion.
+            Falls back to identity check (``other is example``) when omitted.
 
     Returns:
-        :class:`RetrievalCorpus` with ``passages`` and ``gold_indices``.
+        :class:`RetrievalCorpus` whose passages span the global gold pool.
     """
-    evidence: list[str] = list(example["evidence"])
-
-    # Collect distractor candidates from other claims
-    candidates: list[str] = []
+    passages: list[str] = []
     for i, other in enumerate(all_examples):
         if example_index is not None and i == example_index:
             continue
         if other is example:
             continue
-        candidates.extend(other["evidence"])
-
-    rng = random.Random(seed)
-    n_sample = min(distractor_pool_size, len(candidates))
-    distractors = rng.sample(candidates, k=n_sample) if n_sample > 0 else []
-
-    passages = evidence + distractors
-    poisoned_positions: set[int] = example.get("poisoned_positions", set())
-    gold_indices = set(range(len(evidence))) - poisoned_positions
-
-    return RetrievalCorpus(passages=passages, gold_indices=gold_indices)
+        passages.extend(other["evidence"])
+    return RetrievalCorpus(passages=passages)
 
 
-def build_hotpotqa_corpus(example: dict) -> RetrievalCorpus:
-    """Build a RetrievalCorpus from a HotpotQA example's context.
+def build_hotpotqa_corpus(
+    example: dict,
+    all_examples: list[dict],
+    *,
+    example_index: int | None = None,
+) -> RetrievalCorpus:
+    """Build the global gold passage pool for a HotpotQA *example*.
 
-    Each paragraph becomes one passage (sentences joined by space). Gold
-    indices are those whose title appears in supporting_facts but not in
-    poisoned_positions.
+    Each supporting paragraph from other examples in *all_examples* becomes one
+    passage (sentences joined by space).
+
+    Args:
+        example: HotpotQA example dict with ``question``, ``context``,
+                 ``supporting_facts`` keys.
+        all_examples: Full HotpotQA dataset used as the global gold pool.
+        example_index: Index of *example* in *all_examples* for fast exclusion.
     """
-    supporting_titles = {title for title, _ in example["supporting_facts"]}
-    poisoned_titles = {title for title, _ in example.get("poisoned_positions", [])}
-
     passages: list[str] = []
-    gold_indices: set[int] = set()
-    for i, (title, sents) in enumerate(example["context"]):
-        passages.append(" ".join(sents))
-        if title in supporting_titles and title not in poisoned_titles:
-            gold_indices.add(i)
-    return RetrievalCorpus(passages=passages, gold_indices=gold_indices)
+    for i, other in enumerate(all_examples):
+        if example_index is not None and i == example_index:
+            continue
+        if other is example:
+            continue
+        sup_titles = {title for title, _ in other.get("supporting_facts", [])}
+        for title, sents in other.get("context", []):
+            if title in sup_titles:
+                passages.append(" ".join(sents))
+    return RetrievalCorpus(passages=passages)
 
 
 def build_all_corpora(
     examples: list[dict],
-    distractor_pool_size: int = 20,
-    seed: int = 42,
+    full_dataset: list[dict] | None = None,
 ) -> list[RetrievalCorpus]:
     """Build retrieval corpora for every example in *examples*.
 
-    Uses a per-example seed offset so corpora are independently reproducible
-    while remaining deterministic for a fixed global ``seed``.
+    Args:
+        examples: Examples to evaluate.
+        full_dataset: Full dataset used as global gold pool. Defaults to
+            *examples* (acceptable when the evaluated set equals the full dataset).
     """
+    pool = full_dataset if full_dataset is not None else examples
     return [
-        build_corpus(
-            example=ex,
-            all_examples=examples,
-            distractor_pool_size=distractor_pool_size,
-            seed=seed + i,
-            example_index=i,
-        )
-        for i, ex in enumerate(examples)
+        build_corpus(example=ex, all_examples=pool)
+        for ex in examples
     ]
