@@ -12,7 +12,6 @@ class EvaluationCase:
     claim: str
     gold_label: str
     passages: list[str]
-    gold_passages: list[str]
     prompts: list[str]
     prompt_type: str
 
@@ -34,7 +33,6 @@ class QACase:
     question: str
     gold_answer: str
     passages: list[str]
-    gold_passages: list[str]
     prompts: list[str]
     prompt_type: str
 

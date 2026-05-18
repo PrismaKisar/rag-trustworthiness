@@ -17,9 +17,11 @@ EXAMPLES = [
     {"claim": "Unknown fact.", "evidence": ["Some text."], "label": "NOT ENOUGH INFO"},
 ]
 
+
 def _retriever(passages=("passage A", "passage B")):
     r = MagicMock()
     r.retrieve.return_value = list(passages)
+    r.k = 10
     return r
 
 
@@ -48,43 +50,45 @@ class TestPrepareCases:
         for case, ex in zip(cases, EXAMPLES):
             assert case.claim == ex["claim"]
 
-    def test_single_run_yields_one_prompt_per_case(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=1)
+    def test_one_prompt_per_case(self):
+        cases = scorer.prepare_cases(EXAMPLES, _retriever())
         for case in cases:
             assert len(case.prompts) == 1
 
-    def test_multiple_runs_yields_matching_prompt_count(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=3)
-        for case in cases:
-            assert len(case.prompts) == 3
-
     def test_prompt_contains_claim_text(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=1)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever())
         for case in cases:
             assert case.claim in case.prompts[0]
 
     def test_prompt_contains_retrieved_passages(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(("gold A", "gold B")), sc_runs=1)
+        cases = scorer.prepare_cases(EXAMPLES, _retriever(("distractor A", "distractor B")))
         for case in cases:
-            assert "gold A" in case.prompts[0]
-            assert "gold B" in case.prompts[0]
+            assert "distractor A" in case.prompts[0]
+            assert "distractor B" in case.prompts[0]
 
-    def test_passages_come_from_retriever(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever(("x", "y", "z")))
-        for case in cases:
-            assert case.passages == ["x", "y", "z"]
-
-    def test_gold_passages_are_strings(self):
-        cases = scorer.prepare_cases(EXAMPLES, _retriever())
-        for case in cases:
-            assert isinstance(case.gold_passages, list)
-            assert all(isinstance(p, str) for p in case.gold_passages)
-
-    def test_gold_passages_contain_original_evidence(self):
+    def test_prompt_contains_injected_evidence(self):
+        """Evidence from example is injected directly into the context."""
         cases = scorer.prepare_cases(EXAMPLES, _retriever())
         for case, ex in zip(cases, EXAMPLES):
             for ev in ex["evidence"]:
-                assert ev in case.gold_passages
+                assert ev in case.prompts[0]
+
+    def test_passages_include_injected_evidence(self):
+        """case.passages must contain the example's evidence."""
+        cases = scorer.prepare_cases(EXAMPLES, _retriever())
+        for case, ex in zip(cases, EXAMPLES):
+            for ev in ex["evidence"]:
+                assert ev in case.passages
+
+    def test_passages_retrieved_count_is_k_minus_n_gold(self):
+        """Retriever is called with k - n_gold, not full k."""
+        for ex in EXAMPLES:
+            r = _retriever()
+            r.k = 10
+            scorer.prepare_cases([ex], r)
+            n_gold = len(ex["evidence"])
+            _, call_kwargs = r.retrieve.call_args
+            assert call_kwargs.get("k", None) == 10 - n_gold
 
     def test_prompt_type_stored_on_case(self):
         cases = scorer.prepare_cases(EXAMPLES, _retriever(), prompt_type="chain_of_thought")
@@ -101,36 +105,10 @@ class TestPrepareCases:
         scorer.prepare_cases(EXAMPLES, r)
         assert r.retrieve.call_count == len(EXAMPLES)
 
-    def test_sc_run_prompts_contain_same_passages(self):
-        """All sc-run prompts for one case contain the same passages (just shuffled)."""
-        passages = ("A", "B", "C")
-        cases = scorer.prepare_cases(EXAMPLES[:1], _retriever(passages), sc_runs=5, seed=0)
-        case = cases[0]
-        for prompt in case.prompts:
-            for p in passages:
-                assert p in prompt
-
-    def test_deterministic_with_same_seed(self):
-        r1, r2 = _retriever(), _retriever()
-        cases1 = scorer.prepare_cases(EXAMPLES, r1, sc_runs=3, seed=7)
-        cases2 = scorer.prepare_cases(EXAMPLES, r2, sc_runs=3, seed=7)
-        for c1, c2 in zip(cases1, cases2):
-            assert c1.prompts == c2.prompts
-
     def test_returns_evaluation_case_instances(self):
         cases = scorer.prepare_cases(EXAMPLES, _retriever())
         for case in cases:
             assert isinstance(case, EvaluationCase)
-
-    def test_gold_passages_consistent_with_build_all_corpora(self):
-        """gold_passages must equal what build_all_corpora() derives for the same inputs."""
-        from src.retrieval.corpus import build_all_corpora
-        corpora = build_all_corpora(EXAMPLES, distractor_pool_size=5, seed=42)
-        cases = scorer.prepare_cases(
-            EXAMPLES, _retriever(), distractor_pool_size=5, seed=42,         )
-        for case, corpus in zip(cases, corpora):
-            expected_gold = [corpus.passages[j] for j in sorted(corpus.gold_indices)]
-            assert case.gold_passages == expected_gold
 
 
 # ---------------------------------------------------------------------------
@@ -138,34 +116,31 @@ class TestPrepareCases:
 # ---------------------------------------------------------------------------
 
 class TestResolve:
-    def _make_cases(self, sc_runs=1):
-        return scorer.prepare_cases(EXAMPLES, _retriever(), sc_runs=sc_runs)
+    def _make_cases(self):
+        return scorer.prepare_cases(EXAMPLES, _retriever())
 
     def test_returns_one_result_per_case(self):
         cases = self._make_cases()
         results = scorer.resolve(cases, _llm())
         assert len(results) == len(cases)
 
-    def test_runs_length_matches_prompt_count(self):
-        cases = self._make_cases(sc_runs=3)
+    def test_runs_length_is_one(self):
+        cases = self._make_cases()
         results = scorer.resolve(cases, _llm())
-        for case, result in zip(cases, results):
-            assert len(result.runs) == len(case.prompts)
+        for result in results:
+            assert len(result.runs) == 1
 
-    def test_llm_called_once_per_prompt_total(self):
-        sc_runs = 3
-        cases = self._make_cases(sc_runs=sc_runs)
+    def test_llm_called_once_per_example(self):
+        cases = self._make_cases()
         llm = _llm()
         scorer.resolve(cases, llm)
-        assert llm.complete.call_count == len(EXAMPLES) * sc_runs
+        assert llm.complete.call_count == len(EXAMPLES)
 
-    def test_predicted_label_is_majority(self):
-        cases = self._make_cases(sc_runs=3)
-        llm = MagicMock()
-        # First case: 2 SUPPORTS + 1 REFUTES → SUPPORTS
-        llm.complete.side_effect = ["SUPPORTS", "SUPPORTS", "REFUTES"] * len(EXAMPLES)
-        results = scorer.resolve(cases, llm)
-        assert results[0].predicted_label == "SUPPORTS"
+    def test_predicted_label_from_llm_response(self):
+        cases = self._make_cases()
+        results = scorer.resolve(cases, _llm("REFUTES"))
+        for result in results:
+            assert result.predicted_label == "REFUTES"
 
     def test_case_index_matches_position(self):
         cases = self._make_cases()
@@ -179,18 +154,11 @@ class TestResolve:
         for result in results:
             assert isinstance(result, EvaluationResult)
 
-    def test_runs_contain_extracted_labels(self):
-        cases = self._make_cases(sc_runs=1)
-        results = scorer.resolve(cases, _llm("REFUTES"))
-        for result in results:
-            assert result.runs[0] in ("SUPPORTS", "REFUTES", "NOT ENOUGH INFO")
-
     def test_contradiction_flag_true_when_response_contains_contradiction(self):
         cases = scorer.prepare_cases(
             [{"claim": "C", "evidence": ["p1", "p2"], "label": "REFUTES"}],
             _retriever(),
             prompt_type="vigilant",
-            sc_runs=1,
         )
         vigilant_response = (
             "Consistency check: The passages contradict each other.\n"
@@ -204,7 +172,6 @@ class TestResolve:
             [{"claim": "C", "evidence": ["p1"], "label": "SUPPORTS"}],
             _retriever(),
             prompt_type="vigilant",
-            sc_runs=1,
         )
         consistent_response = (
             "Consistency check: The passages are consistent.\n"
@@ -219,16 +186,14 @@ class TestResolve:
 # ---------------------------------------------------------------------------
 
 class TestAggregate:
-    def _make_cases_and_results(self, predictions, gold_labels, sc_runs=1):
-        """Build minimal EvaluationCase + EvaluationResult pairs from explicit labels."""
+    def _make_cases_and_results(self, predictions, gold_labels):
         assert len(predictions) == len(gold_labels)
         cases = [
             EvaluationCase(
                 claim=f"claim {i}",
                 gold_label=gold,
                 passages=["p"],
-                gold_passages=["p"],
-                prompts=["prompt"] * sc_runs,
+                prompts=["prompt"],
                 prompt_type="standard",
             )
             for i, gold in enumerate(gold_labels)
@@ -236,7 +201,7 @@ class TestAggregate:
         results = [
             EvaluationResult(
                 case_index=i,
-                runs=[pred] * sc_runs,
+                runs=[pred],
                 predicted_label=pred,
             )
             for i, pred in enumerate(predictions)
@@ -246,7 +211,17 @@ class TestAggregate:
     def test_returns_required_keys(self):
         cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"])
         out = scorer.aggregate(cases, results)
-        assert {"accuracy", "macro_f1", "hallucination_rate", "recall_at_k"} <= out.keys()
+        assert {"accuracy", "macro_f1", "hallucination_rate"} <= out.keys()
+
+    def test_no_recall_at_k_key(self):
+        cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"])
+        out = scorer.aggregate(cases, results)
+        assert "recall_at_k" not in out
+
+    def test_no_self_consistency_key(self):
+        cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"])
+        out = scorer.aggregate(cases, results)
+        assert "self_consistency" not in out
 
     def test_perfect_accuracy(self):
         preds = ["SUPPORTS", "REFUTES", "NOT ENOUGH INFO"]
@@ -261,47 +236,6 @@ class TestAggregate:
         cases, results = self._make_cases_and_results(preds, gold)
         out = scorer.aggregate(cases, results)
         assert out["accuracy"] == pytest.approx(0.0)
-
-    def test_recall_at_k_perfect_when_passages_match_gold(self):
-        cases = [
-            EvaluationCase(
-                claim="c", gold_label="SUPPORTS",
-                passages=["gold passage"],
-                gold_passages=["gold passage"],
-                prompts=["p"], prompt_type="standard",
-            )
-        ]
-        results = [EvaluationResult(case_index=0, runs=["SUPPORTS"], predicted_label="SUPPORTS")]
-        out = scorer.aggregate(cases, results)
-        assert out["recall_at_k"] == pytest.approx(1.0)
-
-    def test_recall_at_k_zero_when_no_overlap(self):
-        cases = [
-            EvaluationCase(
-                claim="c", gold_label="SUPPORTS",
-                passages=["distractor"],
-                gold_passages=["gold passage"],
-                prompts=["p"], prompt_type="standard",
-            )
-        ]
-        results = [EvaluationResult(case_index=0, runs=["SUPPORTS"], predicted_label="SUPPORTS")]
-        out = scorer.aggregate(cases, results)
-        assert out["recall_at_k"] == pytest.approx(0.0)
-
-    def test_no_self_consistency_key_for_single_run(self):
-        cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"], sc_runs=1)
-        out = scorer.aggregate(cases, results)
-        assert "self_consistency" not in out
-
-    def test_self_consistency_key_present_for_multiple_runs(self):
-        cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"], sc_runs=3)
-        out = scorer.aggregate(cases, results)
-        assert "self_consistency" in out
-
-    def test_self_consistency_perfect_when_all_runs_agree(self):
-        cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"], sc_runs=3)
-        out = scorer.aggregate(cases, results)
-        assert out["self_consistency"] == pytest.approx(1.0)
 
     def test_all_values_in_range(self):
         preds = ["SUPPORTS", "REFUTES", "NOT ENOUGH INFO"]
@@ -324,11 +258,6 @@ class TestAggregate:
     def test_contradiction_detection_rate_absent_for_standard(self):
         cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"])
         out = scorer.aggregate(cases, results, prompt_type="standard")
-        assert "contradiction_detection_rate" not in out
-
-    def test_contradiction_detection_rate_absent_by_default(self):
-        cases, results = self._make_cases_and_results(["SUPPORTS"], ["SUPPORTS"])
-        out = scorer.aggregate(cases, results)
         assert "contradiction_detection_rate" not in out
 
 

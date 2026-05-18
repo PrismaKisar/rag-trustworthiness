@@ -33,10 +33,10 @@ HOTPOT_EXAMPLES = [
 ]
 
 
-
-def _retriever(passages=("p1", "p2", "p3")):
+def _retriever(passages=("p1", "p2")):
     r = MagicMock()
     r.retrieve.return_value = list(passages)
+    r.k = 10
     return r
 
 
@@ -75,34 +75,29 @@ class TestPrepareCases:
         for case in cases:
             assert case.question in case.prompts[0]
 
-    def test_single_run_one_prompt(self):
+    def test_one_prompt_per_case(self):
         from src.evaluation import qa_scorer
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), sc_runs=1)
+        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever())
         for case in cases:
             assert len(case.prompts) == 1
 
-    def test_multiple_runs_match_prompt_count(self):
-        from src.evaluation import qa_scorer
-        cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), sc_runs=4)
-        for case in cases:
-            assert len(case.prompts) == 4
-
-    def test_passages_come_from_retriever(self):
+    def test_passages_include_retrieved_and_supporting(self):
+        """passages = retrieved distractors + injected supporting paragraphs."""
         from src.evaluation import qa_scorer
         cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(("x", "y")))
-        for case in cases:
-            assert case.passages == ["x", "y"]
+        case = cases[0]
+        # retrieved passages must be present
+        assert "x" in case.passages
+        assert "y" in case.passages
+        # supporting paragraph for "Marie Curie" must be injected
+        assert "Marie Curie was born in Warsaw. She won Nobel prizes." in case.passages
 
-    def test_gold_passages_include_supporting_paragraphs(self):
-        """The gold paragraphs are those whose title appears in supporting_facts."""
+    def test_prompt_contains_supporting_passage(self):
+        """The injected supporting paragraph must appear in the formatted prompt."""
         from src.evaluation import qa_scorer
         cases = qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever())
-        # For first example: supporting titles are "Marie Curie" and "Warsaw"
         case = cases[0]
-        joined_marie = " ".join(HOTPOT_EXAMPLES[0]["context"][0][1])
-        joined_warsaw = " ".join(HOTPOT_EXAMPLES[0]["context"][1][1])
-        assert joined_marie in case.gold_passages
-        assert joined_warsaw in case.gold_passages
+        assert "Marie Curie was born in Warsaw." in case.prompts[0]
 
     def test_retriever_built_per_example(self):
         from src.evaluation import qa_scorer
@@ -130,9 +125,9 @@ class TestPrepareCases:
 
 
 class TestResolve:
-    def _make_cases(self, sc_runs=1):
+    def _make_cases(self):
         from src.evaluation import qa_scorer
-        return qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever(), sc_runs=sc_runs)
+        return qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever())
 
     def test_returns_one_result_per_case(self):
         from src.evaluation import qa_scorer
@@ -140,12 +135,12 @@ class TestResolve:
         results = qa_scorer.resolve(cases, _llm())
         assert len(results) == len(cases)
 
-    def test_runs_length_matches_prompt_count(self):
+    def test_runs_length_is_one(self):
         from src.evaluation import qa_scorer
-        cases = self._make_cases(sc_runs=3)
+        cases = self._make_cases()
         results = qa_scorer.resolve(cases, _llm())
-        for case, result in zip(cases, results):
-            assert len(result.runs) == len(case.prompts)
+        for result in results:
+            assert len(result.runs) == 1
 
     def test_predicted_answer_extracted_from_llm_output(self):
         from src.evaluation import qa_scorer
@@ -154,17 +149,12 @@ class TestResolve:
         for result in results:
             assert result.predicted_answer == "Warsaw"
 
-    def test_predicted_answer_majority_across_runs(self):
+    def test_case_index_matches_position(self):
         from src.evaluation import qa_scorer
-        cases = self._make_cases(sc_runs=3)
-        llm = MagicMock()
-        llm.complete.side_effect = [
-            "Answer: Warsaw", "Answer: Warsaw", "Answer: Krakow",
-            "Answer: Clarke", "Answer: Clarke", "Answer: Asimov",
-        ]
-        results = qa_scorer.resolve(cases, llm)
-        assert results[0].predicted_answer == "Warsaw"
-        assert results[1].predicted_answer == "Clarke"
+        cases = self._make_cases()
+        results = qa_scorer.resolve(cases, _llm())
+        for i, result in enumerate(results):
+            assert result.case_index == i
 
 
 # ---------------------------------------------------------------------------
@@ -173,16 +163,14 @@ class TestResolve:
 
 
 class TestAggregate:
-    def _make_pair(self, predictions, gold_answers, gold_passages=None, retrieved=None):
+    def _make_pair(self, predictions, gold_answers, retrieved=None):
         from src.evaluation.cases import QACase, QAResult
-        gold_passages = gold_passages or [["g"]] * len(predictions)
         retrieved = retrieved or [["g"]] * len(predictions)
         cases = [
             QACase(
                 question=f"q-{i}",
                 gold_answer=gold,
                 passages=retrieved[i],
-                gold_passages=gold_passages[i],
                 prompts=["p"],
                 prompt_type="standard_qa",
             )
@@ -198,7 +186,19 @@ class TestAggregate:
         from src.evaluation import qa_scorer
         cases, results = self._make_pair(["Warsaw"], ["Warsaw"])
         out = qa_scorer.aggregate(cases, results)
-        assert {"exact_match", "token_f1", "recall_at_k"} <= out.keys()
+        assert {"exact_match", "token_f1", "hallucination_rate"} <= out.keys()
+
+    def test_no_recall_at_k_key(self):
+        from src.evaluation import qa_scorer
+        cases, results = self._make_pair(["Warsaw"], ["Warsaw"])
+        out = qa_scorer.aggregate(cases, results)
+        assert "recall_at_k" not in out
+
+    def test_no_self_consistency_key(self):
+        from src.evaluation import qa_scorer
+        cases, results = self._make_pair(["Warsaw"], ["Warsaw"])
+        out = qa_scorer.aggregate(cases, results)
+        assert "self_consistency" not in out
 
     def test_perfect_em(self):
         from src.evaluation import qa_scorer
@@ -218,34 +218,10 @@ class TestAggregate:
         out = qa_scorer.aggregate(cases, results)
         assert out["token_f1"] == pytest.approx(1.0)
 
-    def test_recall_at_k_perfect(self):
-        from src.evaluation import qa_scorer
-        cases, results = self._make_pair(
-            ["Warsaw"], ["Warsaw"],
-            gold_passages=[["g1", "g2"]],
-            retrieved=[["g1", "g2"]],
-        )
-        out = qa_scorer.aggregate(cases, results)
-        assert out["recall_at_k"] == pytest.approx(1.0)
-
-    def test_no_self_consistency_for_single_run(self):
-        from src.evaluation import qa_scorer
-        cases, results = self._make_pair(["Warsaw"], ["Warsaw"])
-        out = qa_scorer.aggregate(cases, results)
-        assert "self_consistency" not in out
-
-    def test_includes_hallucination_rate(self):
-        from src.evaluation import qa_scorer
-        cases, results = self._make_pair(["Warsaw"], ["Warsaw"])
-        out = qa_scorer.aggregate(cases, results)
-        assert "hallucination_rate" in out
-        assert 0.0 <= out["hallucination_rate"] <= 1.0
-
     def test_hallucination_rate_zero_when_grounded(self):
         from src.evaluation import qa_scorer
         cases, results = self._make_pair(
-            ["Warsaw"],
-            ["Warsaw"],
+            ["Warsaw"], ["Warsaw"],
             retrieved=[["Warsaw is the capital of Poland."]],
         )
         out = qa_scorer.aggregate(cases, results)
@@ -254,8 +230,7 @@ class TestAggregate:
     def test_hallucination_rate_one_when_ungrounded(self):
         from src.evaluation import qa_scorer
         cases, results = self._make_pair(
-            ["xyzzyquux"],
-            ["Warsaw"],
+            ["xyzzyquux"], ["Warsaw"],
             retrieved=[["Marie Curie was born in Poland."]],
         )
         out = qa_scorer.aggregate(cases, results)
@@ -276,6 +251,7 @@ class TestRunComposer:
             llm=_llm("Final Answer: Warsaw"),
             prompt_type="standard_qa",
         )
-        assert {"exact_match", "token_f1", "recall_at_k"} <= out.keys()
+        assert {"exact_match", "token_f1", "hallucination_rate"} <= out.keys()
+        assert "recall_at_k" not in out
         for v in out.values():
             assert 0.0 <= v <= 1.0
