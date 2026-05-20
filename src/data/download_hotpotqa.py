@@ -57,6 +57,6 @@ def download(target: Path = DEFAULT_TARGET, url: str = DEFAULT_URL) -> Path:
     return target
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     logging.basicConfig(level=logging.INFO)
     download()

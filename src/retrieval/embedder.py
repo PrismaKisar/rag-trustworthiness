@@ -139,7 +139,7 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     logging.basicConfig(level=logging.INFO)
     embedder = Embedder()
     sample = ["The cat sat on the mat.", "Paris is the capital of France."]
