@@ -129,6 +129,10 @@ class TestResolve:
         from src.evaluation import qa_scorer
         return qa_scorer.prepare_cases(HOTPOT_EXAMPLES, _retriever())
 
+    def test_empty_cases_returns_empty_list(self):
+        from src.evaluation import qa_scorer
+        assert qa_scorer.resolve([], _llm()) == []
+
     def test_returns_one_result_per_case(self):
         from src.evaluation import qa_scorer
         cases = self._make_cases()
@@ -235,6 +239,11 @@ class TestAggregate:
         )
         out = qa_scorer.aggregate(cases, results)
         assert out["hallucination_rate"] == pytest.approx(1.0)
+
+    def test_empty_cases_returns_zero_metrics(self):
+        from src.evaluation import qa_scorer
+        out = qa_scorer.aggregate([], [])
+        assert out == {"exact_match": 0.0, "token_f1": 0.0}
 
 
 # ---------------------------------------------------------------------------

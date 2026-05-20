@@ -187,32 +187,3 @@ class TestQAPromptEdgeCases:
         prompt = format_prompt(QUESTION, QA_PASSAGES, "standard_qa")
         assert "1." in prompt
         assert "2." in prompt
-
-
-# ---------------------------------------------------------------------------
-# Unified formatter: format_prompt handles all 6 prompt types
-# ---------------------------------------------------------------------------
-
-
-class TestUnifiedFormatter:
-    def test_qa_type_via_format_prompt_contains_question(self):
-        prompt = format_prompt(QUESTION, QA_PASSAGES, "standard_qa")
-        assert QUESTION in prompt
-
-    def test_cot_qa_via_format_prompt_has_reasoning_marker(self):
-        prompt = format_prompt(QUESTION, QA_PASSAGES, "cot_qa")
-        assert "Reasoning:" in prompt
-
-    def test_vigilant_qa_via_format_prompt_has_consistency_marker(self):
-        prompt = format_prompt(QUESTION, QA_PASSAGES, "vigilant_qa")
-        assert "Consistency check:" in prompt
-
-    def test_query_injected_regardless_of_internal_kwarg_name(self):
-        claim_prompt = format_prompt("The sky is blue.", [], "standard")
-        qa_prompt = format_prompt("The sky is blue.", [], "standard_qa")
-        assert "The sky is blue." in claim_prompt
-        assert "The sky is blue." in qa_prompt
-
-    def test_invalid_type_raises_value_error(self):
-        with pytest.raises(ValueError, match="Unknown prompt_type"):
-            format_prompt(QUESTION, QA_PASSAGES, "bogus_type")

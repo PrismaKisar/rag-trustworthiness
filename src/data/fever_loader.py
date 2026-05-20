@@ -57,7 +57,7 @@ def load_fever(
     return examples
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     import sys
 
     logging.basicConfig(level=logging.INFO)

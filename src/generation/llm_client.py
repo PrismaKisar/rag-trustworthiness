@@ -136,7 +136,7 @@ class LLMClient(ABC):
                     attempt + 1, _MAX_RETRIES, status, sleep_s,
                 )
                 time.sleep(sleep_s)
-        raise RuntimeError("unreachable")  # satisfies type checker
+        raise RuntimeError("unreachable")  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
