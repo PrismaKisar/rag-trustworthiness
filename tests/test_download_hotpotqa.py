@@ -54,3 +54,29 @@ def test_download_skips_when_target_exists(tmp_path: Path):
 
     mock_urlopen.assert_not_called()
     assert target.read_text(encoding="utf-8") == "already there"
+
+
+def test_download_fetches_and_converts_when_missing(tmp_path: Path):
+    """When target does not exist, download() calls urlopen and produces a jsonl file."""
+    import json
+    from io import BytesIO
+    from unittest.mock import MagicMock, patch
+    from src.data import download_hotpotqa
+
+    target = tmp_path / "hotpotqa" / "dev.jsonl"
+    raw_json = json.dumps([{"_id": "a", "question": "Q?", "answer": "A",
+                            "supporting_facts": [], "context": []}])
+
+    mock_response = MagicMock()
+    mock_response.__enter__ = lambda s: s
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_response.read.return_value = raw_json.encode()
+
+    with patch("urllib.request.urlopen", return_value=mock_response):
+        result = download_hotpotqa.download(target=target, url="http://example/dev.json")
+
+    assert result == target
+    assert target.exists()
+    lines = target.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["question"] == "Q?"

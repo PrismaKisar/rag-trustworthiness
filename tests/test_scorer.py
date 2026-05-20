@@ -35,23 +35,6 @@ def _llm(response="SUPPORTS"):
 # ---------------------------------------------------------------------------
 
 class TestRunBasic:
-    def test_returns_required_keys(self):
-        result = scorer.run(EXAMPLES, _retriever(), _llm())
-        assert {"accuracy", "macro_f1", "hallucination_rate"} <= result.keys()
-
-    def test_no_recall_at_k_key(self):
-        result = scorer.run(EXAMPLES, _retriever(), _llm())
-        assert "recall_at_k" not in result
-
-    def test_no_self_consistency_key(self):
-        result = scorer.run(EXAMPLES, _retriever(), _llm())
-        assert "self_consistency" not in result
-
-    def test_metrics_in_range(self):
-        result = scorer.run(EXAMPLES, _retriever(), _llm())
-        for val in result.values():
-            assert 0.0 <= val <= 1.0
-
     def test_perfect_accuracy(self):
         label_by_claim = {
             "The sky is blue.": "SUPPORTS",

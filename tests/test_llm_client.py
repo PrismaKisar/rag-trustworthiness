@@ -343,3 +343,160 @@ class TestHuggingFaceClientClose:
             with client:
                 pass
         mock_close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _get_device - device selection
+# ---------------------------------------------------------------------------
+
+
+class TestGetDevice:
+    def test_returns_cuda_when_available(self):
+        from src.generation.llm_client import _get_device
+        with (
+            patch("torch.cuda.is_available", return_value=True),
+            patch("torch.backends.mps.is_available", return_value=False),
+        ):
+            assert _get_device() == "cuda"
+
+    def test_returns_mps_when_cuda_unavailable(self):
+        from src.generation.llm_client import _get_device
+        with (
+            patch("torch.cuda.is_available", return_value=False),
+            patch("torch.backends.mps.is_available", return_value=True),
+        ):
+            assert _get_device() == "mps"
+
+    def test_returns_cpu_as_fallback(self):
+        from src.generation.llm_client import _get_device
+        with (
+            patch("torch.cuda.is_available", return_value=False),
+            patch("torch.backends.mps.is_available", return_value=False),
+        ):
+            assert _get_device() == "cpu"
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimiting:
+    def test_sleep_called_when_rate_limited(self, tmp_path):
+        """When requests_per_minute is set and last call was very recent, sleep is invoked."""
+        from src.generation.llm_client import LLMClient
+        import time as _time
+
+        class _FastClient(LLMClient):
+            def _call_api(self, prompt: str) -> str:
+                return "ok"
+
+        client = _FastClient(
+            model="test",
+            cache_dir=tmp_path / "llm",
+            requests_per_minute=60,
+        )
+        # Force last call to now so wait will be positive
+        client._last_call_time = _time.time()
+
+        with patch("src.generation.llm_client.time") as mock_time:
+            mock_time.time.return_value = _time.time()
+            mock_time.sleep = MagicMock()
+            client.complete("rate limited prompt")
+
+        mock_time.sleep.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Retry logic
+# ---------------------------------------------------------------------------
+
+
+class TestRetryLogic:
+    def _retryable_exc(self, status: int) -> Exception:
+        exc = Exception(f"status {status}")
+        exc.status_code = status
+        return exc
+
+    def test_retries_on_429_then_succeeds(self, tmp_path):
+        from src.generation.llm_client import LLMClient
+
+        attempts = []
+
+        class _FlakyClient(LLMClient):
+            def _call_api(self, prompt: str) -> str:
+                attempts.append(1)
+                if len(attempts) < 3:
+                    raise self._err()
+                return "ok"
+
+            @staticmethod
+            def _err():
+                e = Exception("rate limit")
+                e.status_code = 429
+                return e
+
+        client = _FlakyClient(model="test", cache_dir=tmp_path / "llm")
+        with patch("src.generation.llm_client.time.sleep"):
+            result = client.complete("flaky prompt")
+
+        assert result == "ok"
+        assert len(attempts) == 3
+
+    def test_non_retryable_exception_propagates_immediately(self, tmp_path):
+        from src.generation.llm_client import LLMClient
+
+        class _BadClient(LLMClient):
+            def _call_api(self, prompt: str) -> str:
+                raise ValueError("not retryable")
+
+        client = _BadClient(model="test", cache_dir=tmp_path / "llm")
+        with pytest.raises(ValueError, match="not retryable"):
+            client.complete("bad prompt")
+
+    def test_retryable_exception_with_non_int_status_propagates(self, tmp_path):
+        from src.generation.llm_client import LLMClient
+
+        class _WeirdClient(LLMClient):
+            def _call_api(self, prompt: str) -> str:
+                e = Exception("weird")
+                e.status_code = "not-an-int"
+                raise e
+
+        client = _WeirdClient(model="test", cache_dir=tmp_path / "llm")
+        with pytest.raises(Exception, match="weird"):
+            client.complete("weird prompt")
+
+    def test_raises_after_max_retries_exhausted(self, tmp_path):
+        from src.generation.llm_client import LLMClient, _MAX_RETRIES
+
+        class _AlwaysFails(LLMClient):
+            def _call_api(self, prompt: str) -> str:
+                e = Exception("503")
+                e.status_code = 503
+                raise e
+
+        client = _AlwaysFails(model="test", cache_dir=tmp_path / "llm")
+        with patch("src.generation.llm_client.time.sleep"):
+            with pytest.raises(Exception, match="503"):
+                client.complete("always fails")
+
+
+# ---------------------------------------------------------------------------
+# HuggingFaceClient._call_api - lazy model loading
+# ---------------------------------------------------------------------------
+
+
+class TestCallApiLazyLoad:
+    def test_load_model_called_when_hf_model_is_none(self, tmp_path):
+        """_call_api must call _load_model() when _hf_model is None."""
+        client, tok, mdl = _make_client(tmp_path)
+        client._hf_model = None  # simulate unloaded state
+
+        _setup_generate(tok, mdl, "SUPPORTS")
+
+        with patch.object(client, "_load_model") as mock_load:
+            mock_load.side_effect = lambda: setattr(client, "_hf_model", mdl)
+            client._call_api("test prompt")
+
+        mock_load.assert_called_once()

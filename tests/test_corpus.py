@@ -132,6 +132,15 @@ def test_build_hotpotqa_global_excludes_non_supporting_from_others():
     assert "Unrelated sentence." not in corpus.passages
 
 
+def test_build_hotpotqa_excludes_self_by_identity_without_index():
+    """When example_index is omitted, the identity check (other is example) excludes self."""
+    corpus = build_hotpotqa_corpus(_HOTPOT_A, _HOTPOT_EXAMPLES)
+    own_sup = {"Marie Curie was born in Warsaw. She won Nobel prizes.",
+               "Warsaw is the capital of Poland. It is in central Poland."}
+    for p in corpus.passages:
+        assert p not in own_sup
+
+
 def test_build_hotpotqa_requires_all_examples():
     """build_hotpotqa_corpus requires all_examples."""
     import inspect

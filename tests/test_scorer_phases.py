@@ -119,6 +119,9 @@ class TestResolve:
     def _make_cases(self):
         return scorer.prepare_cases(EXAMPLES, _retriever())
 
+    def test_empty_cases_returns_empty_list(self):
+        assert scorer.resolve([], _llm()) == []
+
     def test_returns_one_result_per_case(self):
         cases = self._make_cases()
         results = scorer.resolve(cases, _llm())
