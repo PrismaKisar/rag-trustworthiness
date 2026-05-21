@@ -101,20 +101,27 @@ def hallucination_rate(predictions: list[str], gold_labels: list[str]) -> float:
 def qa_hallucination_rate(
     predicted_answers: list[str],
     retrieved_passages_per_case: list[list[str]],
+    grounding_threshold: float = 0.5,
 ) -> float:
-    """Fraction of predicted answers with zero token overlap with any retrieved passage.
+    """Fraction of predicted answers where fewer than *grounding_threshold* of
+    their tokens appear in the retrieved passages.
 
-    Operationalises grounding failure: an answer not supported by any token
-    in the retrieved evidence is considered hallucinated (generated from
-    parametric memory alone). Attribution: inspired by Lewis et al. 2020 -
-    RAG reduces hallucination by grounding answers in retrieved passages.
+    Uses token precision (overlap / len(pred_tokens)) rather than F1 so that
+    short but fully grounded answers are not penalised by long passage length.
+    Attribution: inspired by Lewis et al. 2020 - RAG reduces hallucination by
+    grounding answers in retrieved passages.
     """
     if not predicted_answers:
         return 0.0
     hallucinated = 0
     for pred, passages in zip(predicted_answers, retrieved_passages_per_case):
-        passage_text = " ".join(passages)
-        if token_f1(pred, passage_text) == 0.0:
+        pred_tokens = _normalise_answer(pred).split()
+        if not pred_tokens:
+            hallucinated += 1
+            continue
+        passage_tokens = set(_normalise_answer(" ".join(passages)).split())
+        precision = sum(1 for t in pred_tokens if t in passage_tokens) / len(pred_tokens)
+        if precision < grounding_threshold:
             hallucinated += 1
     return hallucinated / len(predicted_answers)
 

@@ -40,7 +40,7 @@ prompts:
 
 # --- Evaluation ---
 evaluation:
-  n_examples: 50              # claims evaluated in main experiment
+  n_examples: 75              # claims evaluated in main experiment
 
 # --- Caching ---
 cache:
