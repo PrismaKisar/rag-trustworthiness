@@ -28,7 +28,13 @@ _KEYWORD_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 
 
 _FINAL_ANSWER_RE = re.compile(
-    r"(?:final\s+)?answer\s*[:\-]\s*(.+?)(?:\n|$)",
+    r"\*{0,2}(?:final\s+)?answer\s*\*{0,2}\s*[:\-]\s*\*{0,2}\s*(.+?)(?:\n|$)",
+    re.IGNORECASE,
+)
+
+# Catches "the answer is X" / "I believe the answer is X" in free-form CoT text.
+_INLINE_ANSWER_RE = re.compile(
+    r"\bthe\s+(?:correct\s+)?answer\s+is\s+(.+?)(?:[.\n]|$)",
     re.IGNORECASE,
 )
 
@@ -37,14 +43,23 @@ def extract_answer(text: str) -> str:
     """Extract a free-form answer string from an LLM QA response.
 
     Strategy:
-      1. Look for "Final Answer:" / "Answer:" marker (greedy match: prefer the
-         last one when multiple markers exist).
-      2. Strip surrounding whitespace and one trailing period.
-      3. Fall back to the stripped full text when no marker is present.
+      1. Look for "Final Answer:" / "Answer:" marker, handling bold markdown
+         (``**Final Answer:**``) by consuming surrounding ``*`` characters.
+         Prefer the last match when multiple markers exist.
+      2. Fallback to "the answer is X" inline pattern for CoT-style outputs
+         that omit the structured marker.
+      3. Strip surrounding whitespace, leading ``*`` markdown artefacts, and
+         one trailing period.
+      4. Fall back to the stripped full text when nothing matches.
     """
     matches = list(_FINAL_ANSWER_RE.finditer(text))
-    raw = matches[-1].group(1) if matches else text
-    cleaned = raw.strip()
+    if matches:
+        raw = matches[-1].group(1)
+    else:
+        inline = list(_INLINE_ANSWER_RE.finditer(text))
+        raw = inline[-1].group(1) if inline else text
+
+    cleaned = re.sub(r"^\*+\s*", "", raw.strip())
     if cleaned.endswith("."):
         cleaned = cleaned[:-1].rstrip()
     return cleaned

@@ -106,6 +106,38 @@ class TestExtractAnswer:
         from src.generation.parser import extract_answer
         assert extract_answer("Final Answer - Berlin") == "Berlin"
 
+    def test_bold_markdown_final_answer(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("**Final Answer:** Switzerland") == "Switzerland"
+
+    def test_bold_markdown_with_verbose_answer(self):
+        from src.generation.parser import extract_answer
+        result = extract_answer("Passages inconsistent.\n\n**Final Answer:** No.")
+        assert result == "No"
+
+    def test_bold_markdown_answer_colon(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("**Answer:** Paris") == "Paris"
+
+    def test_bold_with_extra_spaces(self):
+        from src.generation.parser import extract_answer
+        assert extract_answer("**Final Answer:**  October 1922") == "October 1922"
+
+    def test_inline_answer_is_fallback(self):
+        from src.generation.parser import extract_answer
+        text = "Passage 1 mentions X. The answer is Firth of Forth."
+        assert extract_answer(text) == "Firth of Forth"
+
+    def test_inline_the_correct_answer_is(self):
+        from src.generation.parser import extract_answer
+        text = "Based on the evidence, the correct answer is yes."
+        assert extract_answer(text) == "yes"
+
+    def test_last_marker_wins_with_bold(self):
+        from src.generation.parser import extract_answer
+        text = "Answer: first guess\n**Final Answer:** Berlin"
+        assert extract_answer(text) == "Berlin"
+
 
 # ---------------------------------------------------------------------------
 # extract_contradiction_flag - vigilant prompt consistency check
