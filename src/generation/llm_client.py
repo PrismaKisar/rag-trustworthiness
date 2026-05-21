@@ -149,10 +149,10 @@ class HuggingFaceClient(LLMClient):
 
     Uses AutoTokenizer + AutoModelForCausalLM with chat template formatting.
     Compatible with any instruction-tuned model that exposes a chat template
-    (Qwen2.5-Instruct, Llama-3.2-Instruct, SmolLM2-Instruct, Gemma-it, Phi-3.5, …).
+    (Qwen3.5, SmolLM3, Gemma4-it, Llama-3.2-Instruct, …).
 
     Args:
-        model: HuggingFace model ID (e.g. ``"Qwen/Qwen2.5-1.5B-Instruct"``).
+        model: HuggingFace model ID (e.g. ``"Qwen/Qwen3.5-2B"``).
         temperature: Sampling temperature. ``0.0`` = greedy / deterministic.
         cache_dir: Disk cache directory.
         max_tokens: Default max new tokens per generation.
@@ -160,7 +160,7 @@ class HuggingFaceClient(LLMClient):
 
     def __init__(
         self,
-        model: str = "Qwen/Qwen2.5-1.5B-Instruct",
+        model: str = "Qwen/Qwen3.5-2B",
         temperature: float = 0.0,
         cache_dir: str | os.PathLike = ".cache/llm_responses",
     ) -> None:
