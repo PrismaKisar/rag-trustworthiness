@@ -175,6 +175,25 @@ class TestQaHallucinationRate:
     def test_empty_returns_zero(self):
         assert qa_hallucination_rate([], []) == pytest.approx(0.0)
 
+    def test_short_answer_in_long_passage_is_grounded(self):
+        # precision = 1.0 regardless of passage length; F1 would penalise this
+        long_passage = "Albert Einstein was born in Ulm Germany in 1879 studied physics developed theory of relativity won Nobel Prize in Physics in 1921"
+        predicted = ["Albert Einstein"]
+        passages = [[long_passage]]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(0.0)
+
+    def test_partial_grounding_below_threshold_is_hallucinated(self):
+        # pred has 4 tokens, only 1 in passages → precision = 0.25 < 0.5
+        predicted = ["Einstein invented telephone"]
+        passages = [["Einstein developed the theory of relativity."]]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(1.0)
+
+    def test_partial_grounding_above_threshold_is_grounded(self):
+        # pred has 2 tokens, both in passages → precision = 1.0 >= 0.5
+        predicted = ["Marie Curie"]
+        passages = [["Marie Curie was born in Poland."]]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(0.0)
+
 
 # ---------------------------------------------------------------------------
 # contradiction_detection_rate
