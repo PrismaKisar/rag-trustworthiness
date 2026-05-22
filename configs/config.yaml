@@ -1,0 +1,52 @@
+# --- Reproducibility ---
+seed: 42
+
+# --- Dataset ---
+dataset:
+  default: "fever"            # one of: fever, hotpotqa (overridable via CLI)
+  fever_dev: "data/fever/dev.jsonl"
+  fever_train: "data/fever/train.jsonl"
+  fever_dev_poisoned: "data/fever/dev_poisoned.jsonl"
+  hotpotqa_dev: "data/hotpotqa/dev.jsonl"
+  hotpotqa_dev_poisoned: "data/hotpotqa/dev_poisoned.jsonl"
+
+# --- Negation ---
+negation:
+  model: "Qwen/Qwen3.5-2B"  # fixed model for pre-computing LLM negations
+
+# --- Retrieval ---
+retrieval:
+  embedding_model: "IEITYuan/Yuan-embedding-2.0-en"
+  k: 10                       # top-K passages returned to the LLM
+
+# --- Poisoning ---
+poisoning:
+  poison_rate: 0.0            # 0.0 (clean) or 1.0 (fully poisoned); overridable via CLI
+  strategy: "llm_negation"    # LLM rewrites gold evidence into a direct contradiction
+
+# --- Models ---
+models:
+  default: "Qwen/Qwen3.5-2B"
+  available:
+    - "Qwen/Qwen3.5-2B"
+    - "google/gemma-4-E2B-it"
+  temperature: 0.0
+
+# --- Prompts ---
+prompts:
+  default: "standard"         # FEVER prompts: standard, chain_of_thought, vigilant
+  default_qa: "standard_qa"   # HotpotQA prompts: standard_qa, cot_qa, vigilant_qa
+
+# --- Evaluation ---
+evaluation:
+  n_examples: 75            # claims evaluated in main experiment
+
+# --- Caching ---
+cache:
+  dir: ".cache"
+  embeddings_subdir: "embeddings"
+  llm_subdir: "llm_responses"
+
+# --- Inference ---
+inference:
+  note: "Using local HuggingFace models - no API cost. Inference time is the bottleneck. Re-runs are near-free due to caching."

@@ -1,0 +1,258 @@
+"""Tests for src/evaluation/metrics.py."""
+
+import pytest
+
+from src.evaluation.metrics import (
+    accuracy,
+    contradiction_detection_rate,
+    hallucination_rate,
+    macro_f1,
+    qa_hallucination_rate,
+    retrieval_accuracy_correlation,
+)
+
+
+# ---------------------------------------------------------------------------
+# accuracy
+# ---------------------------------------------------------------------------
+
+class TestAccuracy:
+    def test_perfect(self):
+        preds = ["SUPPORTS", "REFUTES", "NOT ENOUGH INFO"]
+        gold  = ["SUPPORTS", "REFUTES", "NOT ENOUGH INFO"]
+        assert accuracy(preds, gold) == 1.0
+
+    def test_zero(self):
+        preds = ["REFUTES", "SUPPORTS", "SUPPORTS"]
+        gold  = ["SUPPORTS", "REFUTES",  "NOT ENOUGH INFO"]
+        assert accuracy(preds, gold) == 0.0
+
+    def test_partial(self):
+        preds = ["SUPPORTS", "REFUTES", "SUPPORTS", "NOT ENOUGH INFO"]
+        gold  = ["SUPPORTS", "SUPPORTS", "SUPPORTS", "NOT ENOUGH INFO"]
+        assert accuracy(preds, gold) == pytest.approx(0.75)
+
+    def test_empty(self):
+        assert accuracy([], []) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# macro_f1
+# ---------------------------------------------------------------------------
+
+class TestMacroF1:
+    def test_perfect(self):
+        labels = ["SUPPORTS", "REFUTES", "NOT ENOUGH INFO"]
+        assert macro_f1(labels, labels) == pytest.approx(1.0)
+
+    def test_in_range(self):
+        preds = ["SUPPORTS", "SUPPORTS", "SUPPORTS"]
+        gold  = ["SUPPORTS", "REFUTES",  "NOT ENOUGH INFO"]
+        score = macro_f1(preds, gold)
+        assert 0.0 <= score <= 1.0
+
+    def test_all_wrong_is_low(self):
+        preds = ["REFUTES",  "SUPPORTS", "SUPPORTS"]
+        gold  = ["SUPPORTS", "REFUTES",  "NOT ENOUGH INFO"]
+        assert macro_f1(preds, gold) < 0.5
+
+    def test_empty(self):
+        assert macro_f1([], []) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# hallucination_rate
+# ---------------------------------------------------------------------------
+
+class TestHallucinationRate:
+    def test_full_hallucination(self):
+        preds = ["SUPPORTS", "REFUTES"]
+        gold  = ["NOT ENOUGH INFO", "NOT ENOUGH INFO"]
+        assert hallucination_rate(preds, gold) == 1.0
+
+    def test_no_hallucination(self):
+        preds = ["NOT ENOUGH INFO", "NOT ENOUGH INFO"]
+        gold  = ["NOT ENOUGH INFO", "NOT ENOUGH INFO"]
+        assert hallucination_rate(preds, gold) == 0.0
+
+    def test_partial(self):
+        preds = ["SUPPORTS", "NOT ENOUGH INFO", "REFUTES", "SUPPORTS"]
+        gold  = ["NOT ENOUGH INFO", "NOT ENOUGH INFO", "SUPPORTS", "REFUTES"]
+        assert hallucination_rate(preds, gold) == pytest.approx(0.5)
+
+    def test_no_nei_gold_returns_zero(self):
+        preds = ["SUPPORTS", "REFUTES"]
+        gold  = ["SUPPORTS", "REFUTES"]
+        assert hallucination_rate(preds, gold) == 0.0
+
+    def test_empty(self):
+        assert hallucination_rate([], []) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# exact_match (QA - HotpotQA)
+# ---------------------------------------------------------------------------
+
+class TestExactMatch:
+    def test_identical(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("Switzerland", "Switzerland") == 1.0
+
+    def test_case_insensitive(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("switzerland", "Switzerland") == 1.0
+
+    def test_strips_articles(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("the eiffel tower", "Eiffel Tower") == 1.0
+
+    def test_strips_punctuation(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("Switzerland.", "Switzerland") == 1.0
+
+    def test_collapses_whitespace(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("Arthur  C.   Clarke", "Arthur C Clarke") == 1.0
+
+    def test_mismatch(self):
+        from src.evaluation.metrics import exact_match
+        assert exact_match("France", "Switzerland") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# token_f1 (QA - HotpotQA)
+# ---------------------------------------------------------------------------
+
+class TestTokenF1:
+    def test_perfect_match(self):
+        from src.evaluation.metrics import token_f1
+        assert token_f1("Marie Curie", "Marie Curie") == pytest.approx(1.0)
+
+    def test_no_overlap(self):
+        from src.evaluation.metrics import token_f1
+        assert token_f1("dog", "cat") == 0.0
+
+    def test_partial_overlap(self):
+        from src.evaluation.metrics import token_f1
+        assert token_f1("Arthur Clarke", "Arthur C Clarke") == pytest.approx(0.8)
+
+    def test_normalises_like_em(self):
+        from src.evaluation.metrics import token_f1
+        assert token_f1("THE Eiffel, Tower.", "eiffel tower") == pytest.approx(1.0)
+
+    def test_empty_prediction_returns_zero(self):
+        from src.evaluation.metrics import token_f1
+        assert token_f1("", "Marie Curie") == 0.0
+
+    def test_empty_gold_returns_zero(self):
+        from src.evaluation.metrics import token_f1
+        assert token_f1("Marie Curie", "") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# qa_hallucination_rate
+# ---------------------------------------------------------------------------
+
+class TestQaHallucinationRate:
+    def test_all_grounded_returns_zero(self):
+        predicted = ["Warsaw"]
+        passages = [["Warsaw is the capital of Poland."]]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(0.0)
+
+    def test_none_grounded_returns_one(self):
+        predicted = ["xyzzyquux"]
+        passages = [["Marie Curie was born in Poland."]]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(1.0)
+
+    def test_mixed_returns_correct_fraction(self):
+        predicted = ["Warsaw", "xyzzyquux"]
+        passages = [
+            ["Warsaw is the capital of Poland."],
+            ["Marie Curie was born in Poland."],
+        ]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(0.5)
+
+    def test_empty_returns_zero(self):
+        assert qa_hallucination_rate([], []) == pytest.approx(0.0)
+
+    def test_short_answer_in_long_passage_is_grounded(self):
+        # precision = 1.0 regardless of passage length; F1 would penalise this
+        long_passage = "Albert Einstein was born in Ulm Germany in 1879 studied physics developed theory of relativity won Nobel Prize in Physics in 1921"
+        predicted = ["Albert Einstein"]
+        passages = [[long_passage]]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(0.0)
+
+    def test_partial_grounding_below_threshold_is_hallucinated(self):
+        # pred has 4 tokens, only 1 in passages → precision = 0.25 < 0.5
+        predicted = ["Einstein invented telephone"]
+        passages = [["Einstein developed the theory of relativity."]]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(1.0)
+
+    def test_partial_grounding_above_threshold_is_grounded(self):
+        # pred has 2 tokens, both in passages → precision = 1.0 >= 0.5
+        predicted = ["Marie Curie"]
+        passages = [["Marie Curie was born in Poland."]]
+        assert qa_hallucination_rate(predicted, passages) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# contradiction_detection_rate
+# ---------------------------------------------------------------------------
+
+class TestContradictionDetectionRate:
+    def test_proportion_of_true_flags(self):
+        assert contradiction_detection_rate([True, True, False, True, False]) == pytest.approx(0.6)
+
+    def test_all_true(self):
+        assert contradiction_detection_rate([True, True, True]) == pytest.approx(1.0)
+
+    def test_all_false(self):
+        assert contradiction_detection_rate([False, False]) == pytest.approx(0.0)
+
+    def test_empty_list_returns_zero(self):
+        assert contradiction_detection_rate([]) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# retrieval_accuracy_correlation
+# ---------------------------------------------------------------------------
+
+class TestRetrievalAccuracyCorrelation:
+    def test_perfect_positive_correlation(self):
+        vals = [0.0, 0.25, 0.5, 0.75, 1.0]
+        result = retrieval_accuracy_correlation(vals, vals)
+        assert result["pearson_r"] == pytest.approx(1.0, abs=1e-9)
+        assert result["spearman_r"] == pytest.approx(1.0, abs=1e-9)
+
+    def test_perfect_negative_correlation(self):
+        precision = [0.0, 0.25, 0.5, 0.75, 1.0]
+        accuracy_vals = [1.0, 0.75, 0.5, 0.25, 0.0]
+        result = retrieval_accuracy_correlation(precision, accuracy_vals)
+        assert result["pearson_r"] == pytest.approx(-1.0, abs=1e-9)
+        assert result["spearman_r"] == pytest.approx(-1.0, abs=1e-9)
+
+    def test_returns_all_keys(self):
+        result = retrieval_accuracy_correlation([0.1, 0.5, 0.9], [0.2, 0.6, 0.8])
+        assert set(result.keys()) == {"pearson_r", "pearson_p", "spearman_r", "spearman_p"}
+
+    def test_p_values_in_range(self):
+        import math
+        precision = [0.1 * i for i in range(10)]
+        accuracy_vals = [0.05 + 0.09 * i for i in range(10)]
+        result = retrieval_accuracy_correlation(precision, accuracy_vals)
+        assert 0.0 <= result["pearson_p"] <= 1.0
+        assert 0.0 <= result["spearman_p"] <= 1.0
+        assert not math.isnan(result["pearson_r"])
+        assert not math.isnan(result["spearman_r"])
+
+    def test_constant_series_returns_nan(self):
+        import math
+        result = retrieval_accuracy_correlation([0.5, 0.5, 0.5], [0.1, 0.5, 0.9])
+        assert math.isnan(result["pearson_r"])
+        assert math.isnan(result["spearman_r"])
+
+    def test_empty_returns_nan(self):
+        import math
+        result = retrieval_accuracy_correlation([], [])
+        assert math.isnan(result["pearson_r"])
+        assert math.isnan(result["spearman_r"])

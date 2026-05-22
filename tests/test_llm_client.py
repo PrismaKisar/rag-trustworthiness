@@ -1,0 +1,502 @@
+"""Tests for src/generation/llm_client.py.
+
+Assertions:
+- complete() returns the model response text (new tokens only, not input).
+- Second call with same prompt is served from cache (model not called again).
+- Cache key is sensitive to model and prompt_type.
+- Greedy decoding when temperature == 0; sampling when temperature > 0.
+- truncation=True is always passed to the tokenizer.
+- pad_token_id is set to eos_token_id when missing.
+- apply_chat_template is called to format the prompt as a chat message.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, call, patch
+
+import pytest
+import torch
+
+from src.generation.llm_client import HuggingFaceClient, _cache_key
+
+_INPUT_LEN = 10  # simulated number of input tokens
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_client(
+    tmp_path,
+    model: str = "Qwen/Qwen2.5-1.5B-Instruct",
+    temperature: float = 0.0,
+) -> tuple[HuggingFaceClient, MagicMock, MagicMock]:
+    """Instantiate HuggingFaceClient with mocked tokenizer and causal model."""
+    with (
+        patch("src.generation.llm_client.AutoTokenizer") as mock_tok_cls,
+        patch("src.generation.llm_client.AutoModelForCausalLM") as mock_model_cls,
+        patch("src.generation.llm_client._get_device", return_value="cpu"),
+    ):
+        mock_tokenizer = MagicMock()
+        mock_tok_cls.from_pretrained.return_value = mock_tokenizer
+        mock_tokenizer.pad_token_id = 0  # already set - no override needed
+        mock_tokenizer.eos_token_id = 1
+
+        mock_hf_model = MagicMock()
+        mock_model_cls.from_pretrained.return_value = mock_hf_model
+        mock_hf_model.to.return_value = mock_hf_model
+
+        client = HuggingFaceClient(
+            model=model,
+            temperature=temperature,
+            cache_dir=tmp_path / "llm",
+        )
+
+    client._tokenizer = mock_tokenizer
+    client._hf_model = mock_hf_model
+    client._device = "cpu"
+    return client, mock_tokenizer, mock_hf_model
+
+
+def _setup_generate(mock_tokenizer: MagicMock, mock_hf_model: MagicMock, text: str) -> None:
+    """Configure mocks for a chat-template → generate → decode round-trip."""
+    mock_tokenizer.apply_chat_template.return_value = "<formatted prompt>"
+
+    # Simulate tokenizer returning _INPUT_LEN input token ids
+    fake_input_ids = torch.zeros(1, _INPUT_LEN, dtype=torch.long)
+    mock_tokenizer.return_value = {
+        "input_ids": fake_input_ids,
+        "attention_mask": torch.ones(1, _INPUT_LEN, dtype=torch.long),
+    }
+
+    # generate returns input_ids + new_ids (total length > _INPUT_LEN)
+    new_token_count = 5
+    fake_output_ids = torch.zeros(1, _INPUT_LEN + new_token_count, dtype=torch.long)
+    mock_hf_model.generate.return_value = fake_output_ids
+
+    mock_tokenizer.decode.return_value = text
+
+
+# ---------------------------------------------------------------------------
+# HuggingFaceClient - basic completion
+# ---------------------------------------------------------------------------
+
+
+class TestHuggingFaceClientComplete:
+    def test_returns_text(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        assert client.complete("Is Paris the capital of France?") == "SUPPORTS"
+        mdl.generate.assert_called_once()
+
+    def test_cache_hit_skips_model(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "REFUTES")
+        first = client.complete("same prompt")
+        second = client.complete("same prompt")
+        assert first == second == "REFUTES"
+        mdl.generate.assert_called_once()  # second call served from cache
+
+    def test_different_prompts_call_model_twice(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        tok.apply_chat_template.return_value = "<formatted>"
+        fake_input_ids = torch.zeros(1, _INPUT_LEN, dtype=torch.long)
+        tok.return_value = {
+            "input_ids": fake_input_ids,
+            "attention_mask": torch.ones(1, _INPUT_LEN, dtype=torch.long),
+        }
+        fake_output = torch.zeros(1, _INPUT_LEN + 3, dtype=torch.long)
+        mdl.generate.return_value = fake_output
+        tok.decode.side_effect = ["SUPPORTS", "REFUTES"]
+        assert client.complete("prompt A") == "SUPPORTS"
+        assert client.complete("prompt B") == "REFUTES"
+        assert mdl.generate.call_count == 2
+
+    def test_strips_whitespace_from_output(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "  SUPPORTS\n")
+        assert client.complete("any prompt") == "SUPPORTS"
+
+    def test_decode_called_on_new_tokens_only(self, tmp_path):
+        """decode must receive only the sliced new tokens, not the full sequence."""
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("test")
+        decode_call_arg = tok.decode.call_args[0][0]
+        # The decoded tensor must have length == total_output - input_length
+        assert len(decode_call_arg) == 5  # new_token_count set in _setup_generate
+
+
+# ---------------------------------------------------------------------------
+# HuggingFaceClient - chat template
+# ---------------------------------------------------------------------------
+
+
+class TestChatTemplate:
+    def test_apply_chat_template_called(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("my prompt")
+        tok.apply_chat_template.assert_called_once()
+        call_args = tok.apply_chat_template.call_args
+        messages = call_args[0][0]
+        assert messages == [{"role": "user", "content": "my prompt"}]
+
+    def test_add_generation_prompt_true(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("prompt")
+        kwargs = tok.apply_chat_template.call_args[1]
+        assert kwargs.get("add_generation_prompt") is True
+
+
+# ---------------------------------------------------------------------------
+# HuggingFaceClient - pad_token_id fallback
+# ---------------------------------------------------------------------------
+
+
+class TestPadTokenId:
+    def test_pad_token_set_to_eos_when_missing(self, tmp_path):
+        with (
+            patch("src.generation.llm_client.AutoTokenizer") as mock_tok_cls,
+            patch("src.generation.llm_client.AutoModelForCausalLM") as mock_model_cls,
+            patch("src.generation.llm_client._get_device", return_value="cpu"),
+        ):
+            mock_tokenizer = MagicMock()
+            mock_tok_cls.from_pretrained.return_value = mock_tokenizer
+            mock_tokenizer.pad_token_id = None   # missing - should be overridden
+            mock_tokenizer.eos_token_id = 42
+
+            mock_hf_model = MagicMock()
+            mock_model_cls.from_pretrained.return_value = mock_hf_model
+            mock_hf_model.to.return_value = mock_hf_model
+
+            client = HuggingFaceClient(cache_dir=tmp_path / "llm")
+            client._load_model()  # lazy - must be triggered explicitly to exercise fallback
+
+        assert mock_tokenizer.pad_token_id == 42
+
+    def test_pad_token_not_overridden_when_present(self, tmp_path):
+        with (
+            patch("src.generation.llm_client.AutoTokenizer") as mock_tok_cls,
+            patch("src.generation.llm_client.AutoModelForCausalLM") as mock_model_cls,
+            patch("src.generation.llm_client._get_device", return_value="cpu"),
+        ):
+            mock_tokenizer = MagicMock()
+            mock_tok_cls.from_pretrained.return_value = mock_tokenizer
+            mock_tokenizer.pad_token_id = 7   # already set
+            mock_tokenizer.eos_token_id = 99
+
+            mock_hf_model = MagicMock()
+            mock_model_cls.from_pretrained.return_value = mock_hf_model
+            mock_hf_model.to.return_value = mock_hf_model
+
+            client = HuggingFaceClient(cache_dir=tmp_path / "llm")
+            client._load_model()  # lazy - must be triggered explicitly
+
+        assert mock_tokenizer.pad_token_id == 7  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# HuggingFaceClient - generation parameters
+# ---------------------------------------------------------------------------
+
+
+class TestHuggingFaceClientGenerationParams:
+    def test_greedy_when_temperature_zero(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path, temperature=0.0)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("greedy prompt")
+        gen_kwargs = mdl.generate.call_args[1]
+        assert gen_kwargs.get("do_sample") is False
+
+    def test_sampling_when_temperature_nonzero(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path, temperature=0.7)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("sample prompt")
+        gen_kwargs = mdl.generate.call_args[1]
+        assert gen_kwargs.get("do_sample") is True
+        assert gen_kwargs.get("temperature") == pytest.approx(0.7)
+
+    def test_truncation_always_enabled(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("long prompt")
+        tok_call_kwargs = tok.call_args[1]
+        assert tok_call_kwargs.get("truncation") is True
+
+    def test_max_new_tokens_is_positive_int(self, tmp_path):
+        client, tok, mdl = _make_client(tmp_path)
+        _setup_generate(tok, mdl, "SUPPORTS")
+        client.complete("prompt")
+        gen_kwargs = mdl.generate.call_args[1]
+        assert isinstance(gen_kwargs.get("max_new_tokens"), int)
+        assert gen_kwargs["max_new_tokens"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Cache key
+# ---------------------------------------------------------------------------
+
+
+class TestCacheKey:
+    def test_deterministic(self):
+        assert _cache_key("p", "m", "standard") == _cache_key("p", "m", "standard")
+
+    def test_sensitive_to_model(self):
+        assert _cache_key("p", "model-a", "standard") != _cache_key("p", "model-b", "standard")
+
+    def test_sensitive_to_prompt(self):
+        assert _cache_key("prompt-1", "m", "standard") != _cache_key("prompt-2", "m", "standard")
+
+    def test_sensitive_to_prompt_type(self):
+        assert _cache_key("p", "m", "standard") != _cache_key("p", "m", "chain_of_thought")
+
+
+# ---------------------------------------------------------------------------
+# LLMClient abstract base - _max_tokens must be declared in the base
+# ---------------------------------------------------------------------------
+
+
+class TestLLMClientBase:
+    """Minimal subclass smoke tests."""
+
+    def _minimal_client(self, tmp_path):
+        from src.generation.llm_client import LLMClient
+
+        class MinimalClient(LLMClient):
+            def _call_api(self, prompt: str) -> str:
+                return "ok"
+
+        return MinimalClient(model="test-model", cache_dir=tmp_path / "llm")
+
+    def test_complete_without_prompt_type_does_not_raise(self, tmp_path):
+        """complete() must not raise when prompt_type is omitted (uses default)."""
+        client = self._minimal_client(tmp_path)
+        assert client.complete("hello") == "ok"
+
+    def test_complete_with_prompt_type_does_not_raise(self, tmp_path):
+        """complete() must accept an explicit prompt_type."""
+        client = self._minimal_client(tmp_path)
+        assert client.complete("hello", "chain_of_thought") == "ok"
+
+
+# ---------------------------------------------------------------------------
+# HuggingFaceClient - close() / memory cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestHuggingFaceClientClose:
+    """close() must release model references and trigger gc.collect()."""
+
+    def _make_loaded_client(self, tmp_path, device: str = "cpu") -> HuggingFaceClient:
+        client, _, _ = _make_client(tmp_path)
+        client._device = device
+        return client
+
+    def test_close_sets_model_and_tokenizer_to_none(self, tmp_path):
+        client = self._make_loaded_client(tmp_path)
+        assert client._hf_model is not None
+        client.close()
+        assert client._hf_model is None
+        assert client._tokenizer is None
+
+    def test_close_calls_gc_collect(self, tmp_path):
+        client = self._make_loaded_client(tmp_path)
+        with patch("src.generation.llm_client.gc") as mock_gc:
+            client.close()
+        mock_gc.collect.assert_called_once()
+
+    def test_close_mps_synchronizes_before_empty_cache(self, tmp_path):
+        client = self._make_loaded_client(tmp_path, device="mps")
+        call_order: list[str] = []
+        with (
+            patch("torch.mps.synchronize", side_effect=lambda: call_order.append("sync")),
+            patch("torch.mps.empty_cache", side_effect=lambda: call_order.append("empty")),
+            patch("src.generation.llm_client.gc"),
+        ):
+            client.close()
+        assert call_order == ["sync", "empty"], "synchronize must precede empty_cache on MPS"
+
+    def test_close_cuda_synchronizes_before_empty_cache(self, tmp_path):
+        client = self._make_loaded_client(tmp_path, device="cuda")
+        call_order: list[str] = []
+        with (
+            patch("torch.cuda.synchronize", side_effect=lambda: call_order.append("sync")),
+            patch("torch.cuda.empty_cache", side_effect=lambda: call_order.append("empty")),
+            patch("src.generation.llm_client.gc"),
+        ):
+            client.close()
+        assert call_order == ["sync", "empty"], "synchronize must precede empty_cache on CUDA"
+
+    def test_close_idempotent(self, tmp_path):
+        """Calling close() twice must not raise."""
+        client = self._make_loaded_client(tmp_path)
+        with patch("src.generation.llm_client.gc"):
+            client.close()
+            client.close()  # second call must be a no-op, not an error
+
+    def test_context_manager_triggers_close(self, tmp_path):
+        client, _, _ = _make_client(tmp_path)
+        with patch.object(client, "close") as mock_close:
+            with client:
+                pass
+        mock_close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _get_device - device selection
+# ---------------------------------------------------------------------------
+
+
+class TestGetDevice:
+    def test_returns_cuda_when_available(self):
+        from src.generation.llm_client import _get_device
+        with (
+            patch("torch.cuda.is_available", return_value=True),
+            patch("torch.backends.mps.is_available", return_value=False),
+        ):
+            assert _get_device() == "cuda"
+
+    def test_returns_mps_when_cuda_unavailable(self):
+        from src.generation.llm_client import _get_device
+        with (
+            patch("torch.cuda.is_available", return_value=False),
+            patch("torch.backends.mps.is_available", return_value=True),
+        ):
+            assert _get_device() == "mps"
+
+    def test_returns_cpu_as_fallback(self):
+        from src.generation.llm_client import _get_device
+        with (
+            patch("torch.cuda.is_available", return_value=False),
+            patch("torch.backends.mps.is_available", return_value=False),
+        ):
+            assert _get_device() == "cpu"
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimiting:
+    def test_sleep_called_when_rate_limited(self, tmp_path):
+        """When requests_per_minute is set and last call was very recent, sleep is invoked."""
+        from src.generation.llm_client import LLMClient
+        import time as _time
+
+        class _FastClient(LLMClient):
+            def _call_api(self, prompt: str) -> str:
+                return "ok"
+
+        client = _FastClient(
+            model="test",
+            cache_dir=tmp_path / "llm",
+            requests_per_minute=60,
+        )
+        # Force last call to now so wait will be positive
+        client._last_call_time = _time.time()
+
+        with patch("src.generation.llm_client.time") as mock_time:
+            mock_time.time.return_value = _time.time()
+            mock_time.sleep = MagicMock()
+            client.complete("rate limited prompt")
+
+        mock_time.sleep.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Retry logic
+# ---------------------------------------------------------------------------
+
+
+class TestRetryLogic:
+    def _retryable_exc(self, status: int) -> Exception:
+        exc = Exception(f"status {status}")
+        exc.status_code = status
+        return exc
+
+    def test_retries_on_429_then_succeeds(self, tmp_path):
+        from src.generation.llm_client import LLMClient
+
+        attempts = []
+
+        class _FlakyClient(LLMClient):
+            def _call_api(self, prompt: str) -> str:
+                attempts.append(1)
+                if len(attempts) < 3:
+                    raise self._err()
+                return "ok"
+
+            @staticmethod
+            def _err():
+                e = Exception("rate limit")
+                e.status_code = 429
+                return e
+
+        client = _FlakyClient(model="test", cache_dir=tmp_path / "llm")
+        with patch("src.generation.llm_client.time.sleep"):
+            result = client.complete("flaky prompt")
+
+        assert result == "ok"
+        assert len(attempts) == 3
+
+    def test_non_retryable_exception_propagates_immediately(self, tmp_path):
+        from src.generation.llm_client import LLMClient
+
+        class _BadClient(LLMClient):
+            def _call_api(self, prompt: str) -> str:
+                raise ValueError("not retryable")
+
+        client = _BadClient(model="test", cache_dir=tmp_path / "llm")
+        with pytest.raises(ValueError, match="not retryable"):
+            client.complete("bad prompt")
+
+    def test_retryable_exception_with_non_int_status_propagates(self, tmp_path):
+        from src.generation.llm_client import LLMClient
+
+        class _WeirdClient(LLMClient):
+            def _call_api(self, prompt: str) -> str:
+                e = Exception("weird")
+                e.status_code = "not-an-int"
+                raise e
+
+        client = _WeirdClient(model="test", cache_dir=tmp_path / "llm")
+        with pytest.raises(Exception, match="weird"):
+            client.complete("weird prompt")
+
+    def test_raises_after_max_retries_exhausted(self, tmp_path):
+        from src.generation.llm_client import LLMClient, _MAX_RETRIES
+
+        class _AlwaysFails(LLMClient):
+            def _call_api(self, prompt: str) -> str:
+                e = Exception("503")
+                e.status_code = 503
+                raise e
+
+        client = _AlwaysFails(model="test", cache_dir=tmp_path / "llm")
+        with patch("src.generation.llm_client.time.sleep"):
+            with pytest.raises(Exception, match="503"):
+                client.complete("always fails")
+
+
+# ---------------------------------------------------------------------------
+# HuggingFaceClient._call_api - lazy model loading
+# ---------------------------------------------------------------------------
+
+
+class TestCallApiLazyLoad:
+    def test_load_model_called_when_hf_model_is_none(self, tmp_path):
+        """_call_api must call _load_model() when _hf_model is None."""
+        client, tok, mdl = _make_client(tmp_path)
+        client._hf_model = None  # simulate unloaded state
+
+        _setup_generate(tok, mdl, "SUPPORTS")
+
+        with patch.object(client, "_load_model") as mock_load:
+            mock_load.side_effect = lambda: setattr(client, "_hf_model", mdl)
+            client._call_api("test prompt")
+
+        mock_load.assert_called_once()
