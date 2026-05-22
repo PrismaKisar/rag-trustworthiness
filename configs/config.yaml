@@ -12,7 +12,7 @@ dataset:
 
 # --- Negation ---
 negation:
-  model: "Qwen/Qwen2.5-1.5B-Instruct"  # fixed model for pre-computing LLM negations
+  model: "Qwen/Qwen3.5-2B"  # fixed model for pre-computing LLM negations
 
 # --- Retrieval ---
 retrieval:
@@ -26,11 +26,10 @@ poisoning:
 
 # --- Models ---
 models:
-  default: "Qwen/Qwen2.5-1.5B-Instruct"
+  default: "Qwen/Qwen3.5-2B"
   available:
-    - "Qwen/Qwen2.5-1.5B-Instruct"
-    - "google/gemma-2-2b-it"
-    - "HuggingFaceTB/SmolLM2-1.7B-Instruct"
+    - "Qwen/Qwen3.5-2B"
+    - "google/gemma-4-E2B-it"
   temperature: 0.0
 
 # --- Prompts ---
@@ -40,7 +39,7 @@ prompts:
 
 # --- Evaluation ---
 evaluation:
-  n_examples: 75              # claims evaluated in main experiment
+  n_examples: 75            # claims evaluated in main experiment
 
 # --- Caching ---
 cache:

@@ -44,6 +44,7 @@ def prepare_cases(
     retriever: Retriever,
     prompt_type: QAPromptType = "standard_qa",
     seed: int = 42,
+    full_dataset: list[dict] | None = None,
 ) -> list[QACase]:
     """Build one QACase per HotpotQA example via retrieval and direct injection.
 
@@ -59,10 +60,14 @@ def prepare_cases(
         retriever: Retriever whose index is rebuilt per example.
         prompt_type: One of ``"standard_qa"``, ``"cot_qa"``, ``"vigilant_qa"``.
         seed: Unused; kept for API compatibility.
+        full_dataset: Fixed global passage pool for retrieval.  Pass the
+            complete dev set so the retrieval results remain stable when *N*
+            changes.  Defaults to *examples* when omitted.
     """
+    pool = full_dataset if full_dataset is not None else examples
     cases: list[QACase] = []
     for i, example in enumerate(examples):
-        corpus = build_hotpotqa_corpus(example, examples, example_index=i)
+        corpus = build_hotpotqa_corpus(example, pool, example_index=i)
         retriever.build(corpus)
 
         sup_titles = {title for title, _ in example["supporting_facts"]}
@@ -159,6 +164,7 @@ def run(
     prompt_type: QAPromptType = "standard_qa",
     seed: int = 42,
     n_workers: int = 4,
+    full_dataset: list[dict] | None = None,
 ) -> dict[str, float]:
     """Run *llm* on every HotpotQA example and return aggregated metrics."""
     from src.evaluation.pipeline import run_pipeline
@@ -170,6 +176,7 @@ def run(
         prompt_type=prompt_type,
         seed=seed,
         n_workers=n_workers,
+        full_dataset=full_dataset,
     )
 
 
@@ -194,6 +201,7 @@ class HotpotQATask:
             retriever=retriever,
             prompt_type=prompt_type,
             seed=seed,
+            full_dataset=kwargs.get("full_dataset"),
         )
 
     def parse_result(self, case_index: int, raw_runs: list[str]) -> QAResult:

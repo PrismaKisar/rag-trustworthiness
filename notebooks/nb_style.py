@@ -1,27 +1,23 @@
 """Shared visual constants for all experiment notebooks."""
 
 MODEL_LABELS = {
-    "Qwen/Qwen2.5-1.5B-Instruct":          "Qwen2.5",
-    "google/gemma-2-2b-it":                "Gemma-2",
-    "HuggingFaceTB/SmolLM2-1.7B-Instruct": "SmolLM2",
+    "Qwen/Qwen3.5-2B":      "Qwen3.5",
+    "google/gemma-4-E2B-it": "Gemma-4",
 }
 
 MODEL_COLORS = {
-    "Qwen/Qwen2.5-1.5B-Instruct":          "#5C6BC0",
-    "google/gemma-2-2b-it":                "#26A69A",
-    "HuggingFaceTB/SmolLM2-1.7B-Instruct": "#FF7043",
+    "Qwen/Qwen3.5-2B":      "#5C6BC0",
+    "google/gemma-4-E2B-it": "#26A69A",
 }
 
 MODEL_MARKERS = {
-    "Qwen/Qwen2.5-1.5B-Instruct":          "o",
-    "google/gemma-2-2b-it":                "s",
-    "HuggingFaceTB/SmolLM2-1.7B-Instruct": "^",
+    "Qwen/Qwen3.5-2B":      "o",
+    "google/gemma-4-E2B-it": "s",
 }
 
 MODEL_LS = {
-    "Qwen/Qwen2.5-1.5B-Instruct":          "-",
-    "google/gemma-2-2b-it":                "--",
-    "HuggingFaceTB/SmolLM2-1.7B-Instruct": "-.",
+    "Qwen/Qwen3.5-2B":      "-",
+    "google/gemma-4-E2B-it": "--",
 }
 
 PROMPT_COLORS = {

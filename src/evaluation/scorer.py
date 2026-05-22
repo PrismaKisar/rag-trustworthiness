@@ -47,6 +47,7 @@ def prepare_cases(
     retriever: Retriever,
     prompt_type: PromptType = "standard",
     seed: int = 42,
+    full_dataset: list[dict] | None = None,
 ) -> list[EvaluationCase]:
     """Build one EvaluationCase per example via retrieval and direct injection.
 
@@ -59,12 +60,16 @@ def prepare_cases(
         retriever: Retriever whose index is rebuilt per example.
         prompt_type: One of ``"standard"``, ``"chain_of_thought"``, ``"vigilant"``.
         seed: Unused; kept for API compatibility.
+        full_dataset: Fixed global passage pool for retrieval.  Pass the
+            complete dev set so the retrieval results — and therefore prompt
+            text and LLM cache keys — remain stable when *N* changes.
+            Defaults to *examples* (original behaviour) when omitted.
 
     Returns:
         List of :class:`~src.evaluation.cases.EvaluationCase` objects,
         one per example, in the same order.
     """
-    corpora = build_all_corpora(examples)
+    corpora = build_all_corpora(examples, full_dataset=full_dataset)
     cases: list[EvaluationCase] = []
     for example, corpus in zip(examples, corpora):
         retriever.build(corpus)
@@ -165,6 +170,7 @@ def run(
     prompt_type: PromptType = "standard",
     seed: int = 42,
     n_workers: int = 4,
+    full_dataset: list[dict] | None = None,
 ) -> dict[str, float]:
     """Run *llm* on every example and return aggregated metrics."""
     from src.evaluation.pipeline import run_pipeline
@@ -176,6 +182,7 @@ def run(
         prompt_type=prompt_type,
         seed=seed,
         n_workers=n_workers,
+        full_dataset=full_dataset,
     )
 
 
@@ -200,6 +207,7 @@ class FeverTask:
             retriever=retriever,
             prompt_type=prompt_type,
             seed=seed,
+            full_dataset=kwargs.get("full_dataset"),
         )
 
     def parse_result(self, case_index: int, raw_runs: list[str]) -> EvaluationResult:
